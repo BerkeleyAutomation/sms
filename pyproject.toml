@@ -1,0 +1,15 @@
+[project]
+name = "sms"
+version = "0.1.1"
+requires-python = ">=3.8"
+
+dependencies=[
+    "Pillow",
+    "open-clip-torch",
+    "numpy",
+]
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["sms*"]

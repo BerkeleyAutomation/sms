@@ -1,0 +1,3 @@
+Pillow
+open-clip-torch
+numpy
