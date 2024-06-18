@@ -1,6 +1,0 @@
-pyproject.toml
-SemanticMobileSearch.egg-info/PKG-INFO
-SemanticMobileSearch.egg-info/SOURCES.txt
-SemanticMobileSearch.egg-info/dependency_links.txt
-SemanticMobileSearch.egg-info/requires.txt
-SemanticMobileSearch.egg-info/top_level.txt
