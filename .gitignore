@@ -1,0 +1,11 @@
+*.ckpt
+
+*.egg-info
+
+*.ipynb
+
+*.log
+
+*.model
+
+__pycache__/
