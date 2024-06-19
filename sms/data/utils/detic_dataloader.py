@@ -51,6 +51,7 @@ from segment_anything import sam_model_registry, SamPredictor
 class DeticDataloader():
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.sam = False
     def create(self):
         # Build the detector and download our pretrained weights
         cfg = get_cfg()
@@ -64,12 +65,13 @@ class DeticDataloader():
         # cfg.MODEL.DEVICE='cpu' # uncomment this to use cpu-only mode.
         self.detic_predictor = DefaultPredictor(cfg)
 
-        sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
-        model_type = "vit_h"
-        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-        sam.to(device=self.device)
-        print('SAM + Detic on device: ', self.device)
-        self.sam_predictor = SamPredictor(sam)
+        if self.sam == True:
+            sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
+            model_type = "vit_h"
+            sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+            sam.to(device=self.device)
+            print('SAM + Detic on device: ', self.device)
+            self.sam_predictor = SamPredictor(sam)
         self.text_encoder = build_text_encoder(pretrain=True)
 
     def default_vocab(self):
@@ -151,6 +153,7 @@ class DeticDataloader():
 
         # Run model and show results
         output = self.detic_predictor(im[:, :, ::-1])  # Detic expects BGR images.
+        # import pdb; pdb.set_trace()
         v = Visualizer(im, self.metadata)
         out = v.draw_instance_predictions(output["instances"].to('cpu'))
         instances = output["instances"].to('cpu')
@@ -161,21 +164,47 @@ class DeticDataloader():
 
         masks = None
         components = torch.zeros(H, W)
-        if len(boxes) > 0:
-            # Only run SAM if there are bboxes
-            masks = self.SAM(im, boxes)
+        if self.sam:
+            if len(boxes) > 0:
+                # Only run SAM if there are bboxes
+                masks = self.SAM(im, boxes)
+                for i in range(masks.shape[0]):
+                    if torch.sum(masks[i][0]) <= H*W/3.5:
+                        components[masks[i][0]] = i + 1
+        else:
+            masks = output['instances'].pred_masks.unsqueeze(1)
             for i in range(masks.shape[0]):
                 if torch.sum(masks[i][0]) <= H*W/3.5:
                     components[masks[i][0]] = i + 1
+        bg_mask = (components == 0).to(self.device)
 
+        # Filter out small masks
+        filtered_idx = []
+        for i in range(len(masks)):
+            if masks[i].sum(dim=(1,2)) <= H*W/3.5:
+                filtered_idx.append(i)
+        filtered_masks = torch.cat([masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0)
+
+        invert_masks = ~filtered_masks
+        # erode all masks using 3x3 kernel
+        eroded_masks = torch.conv2d(
+            invert_masks.float(),
+            torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
+            padding=1,
+        )
+        filtered_masks = ~(eroded_masks >= 5).squeeze(1)  # (num_masks, H, W)
+
+                        
         outputs = {
             "vis": out,
             "boxes": boxes,
             "masks": masks,
-            "class_idx": class_idx,
-            "class_name": class_name,
-            "clip_embeds": clip_embeds,
-            "components": components
+            "masks_filtered": filtered_masks,
+            # "class_idx": class_idx,
+            # "class_name": class_name,
+            # "clip_embeds": clip_embeds,
+            "components": components,
+            "scores" : output["instances"].scores,
         }
         return outputs
 

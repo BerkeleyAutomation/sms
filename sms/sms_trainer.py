@@ -144,7 +144,7 @@ class TrainerConfig(ExperimentConfig):
     """Optionally log gradients during training"""
     gradient_accumulation_steps: int = 1
     """Number of steps to accumulate gradients over."""
-    image_downscale_factor: int = 4
+    image_downscale_factor: int = 2
     """Anti-aliased image downresolution factor."""
 
 class TrainerNode(Node):
@@ -495,7 +495,7 @@ class Trainer:
             print(poses, affected_gaussians_idxs)
         # TODO: mask out regions in all training images
     
-    def deproject_to_RGB_point_cloud(self, image, depth_image, camera, detic_out = None, num_samples = 200, device = 'cuda:0'):
+    def deproject_to_RGB_point_cloud(self, image, depth_image, camera, detic_out = None, num_samples = 100, device = 'cuda:0'):
         """
         Converts a depth image into a point cloud in world space using a Camera object.
         """
@@ -511,14 +511,15 @@ class Trainer:
 
         _, _, height, width = depth_image.shape
 
-        components = torch.zeros(height, width).to(device)
+        # components = torch.zeros(height, width).to(device)
+        flat_components = None
 
-        if detic_out is not None and detic_out['masks'] is not None:
-            masks = detic_out['masks']
-            for i in range(masks.shape[0]):
-                if torch.sum(masks[i][0].to(device)) <= height*width/3.5:
-                    components[masks[i][0].to(device)] = i + 1
-        flat_components = components.reshape(-1).to(device)
+        # if detic_out is not None and detic_out['masks'] is not None:
+        #     masks = detic_out['masks']
+        #     for i in range(masks.shape[0]):
+        #         if torch.sum(masks[i][0].to(device)) <= height*width/3.5:
+        #             components[masks[i][0].to(device)] = i + 1
+        # flat_components = components.reshape(-1).to(device)
 
         grid_x, grid_y = torch.meshgrid(torch.arange(width, device = device), torch.arange(height, device = device), indexing='ij')
         grid_x = grid_x.transpose(0,1).float()
@@ -558,7 +559,7 @@ class Trainer:
 
         P_world = torch.matmul(camera_to_world_homogenized, P_camera.T).T
 
-        flat_components = flat_components[sampled_indices]
+        # flat_components = flat_components[sampled_indices]
         
         return P_world[:, :3], sampled_image, flat_components
     

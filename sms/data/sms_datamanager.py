@@ -30,6 +30,7 @@ import time
 from copy import deepcopy, copy
 from torch.nn import Parameter
 import torch.nn.functional as F
+from torchvision.transforms import Resize, InterpolationMode
 from tqdm import tqdm
 
 from nerfstudio.cameras.rays import RayBundle
@@ -471,18 +472,32 @@ class smsDataManager(DataManager, Generic[TDataset]):
                 scaled_width = W // self.config.clip_downscale_factor
 
                 detic_out = data["detic"]
-                bg_mask = None
-                flat_components = detic_out["components"].reshape(-1).to(int)
-                # import pdb; pdb.set_trace()
-                if detic_out["masks"] is not None:
-                    bg_mask = ~(flat_components == 0)
-                    import matplotlib.pyplot as plt
-                    plt.imsave(f"mask{image_idx}.jpg", ~detic_out["components"] == 0)
+
+                # bg_mask = None
+                # components = detic_out["components"].to(int)
+                # flat_components = detic_out["components"].reshape(-1).to(int)
+                # # import pdb; pdb.set_trace()
+                # if detic_out["masks"] is not None:
+                #     bg_mask = ~(flat_components == 0)
+                #     import matplotlib.pyplot as plt
+                #     plt.imsave(f"mask{image_idx}.jpg", bg_mask.view(H, W).detach().cpu().numpy())
                 
-                if bg_mask is not None:
-                    self.random_pixels = torch.arange(scaled_height*scaled_width) * bg_mask
-                else:
-                    self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.25)]
+                # if bg_mask is not None:
+                #     self.random_pixels = torch.arange(scaled_height*scaled_width) * bg_mask[::self.config.clip_downscale_factor ** 2]
+                # else:
+
+                # Choose 2 random masks for contrastive loss
+                with torch.no_grad():
+                    perm = torch.randperm(len(detic_out["masks_filtered"]))
+
+                    idx = perm[:2]
+                    masks = detic_out["masks_filtered"][idx].squeeze(1)
+                    msk1 = F.interpolate(masks[0].unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(-1)
+                    msk2 = F.interpolate(masks[1].unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(-1)
+                    # import pdb; pdb.set_trace()
+                    data["instance_masks"] = torch.stack((msk1, msk2))
+
+                self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.25)]
 
                 x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
                 y = torch.arange(0, scaled_height*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1)

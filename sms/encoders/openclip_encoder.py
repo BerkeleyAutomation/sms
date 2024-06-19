@@ -11,6 +11,8 @@ except ImportError:
 
 from sms.encoders.image_encoder import (BaseImageEncoder,
                                          BaseImageEncoderConfig)
+from nerfstudio.viewer.viewer_elements import ViewerText
+
 
 @dataclass
 class OpenCLIPNetworkConfig(BaseImageEncoderConfig):
@@ -19,7 +21,7 @@ class OpenCLIPNetworkConfig(BaseImageEncoderConfig):
     clip_model_pretrained: str = "laion2b_s34b_b88k"
     clip_n_dims: int = 512
     negatives: Tuple[str] = ("object", "things", "stuff", "texture")
-    device: str = 'cuda'
+    device: str = 'cuda:0'
 
     @property
     def name(self) -> str:
@@ -39,32 +41,37 @@ class OpenCLIPNetwork(BaseImageEncoder):
                 ),
             ]
         )
-        model, _, self.preprocess = open_clip.create_model_and_transforms(
+        model, _, _ = open_clip.create_model_and_transforms(
             self.config.clip_model_type,  # e.g., ViT-B-16
             pretrained=self.config.clip_model_pretrained,  # e.g., laion2b_s34b_b88k
             precision="fp16",
+            device=self.config.device,
+            # device='cuda:1',
         )
+        # model.to('cuda:1')
         model.eval()
         self.tokenizer = open_clip.get_tokenizer(self.config.clip_model_type)
         self.model = model.to(self.config.device)
         self.clip_n_dims = self.config.clip_n_dims
 
-        # self.positives = self.positive_input.value.split(";")
+        self.positive_input = ViewerText("Positives", "", cb_hook=self.gui_cb)
+
+        self.positives = self.positive_input.value.split(";")
         self.negatives = self.config.negatives
         with torch.no_grad():
-            # tok_phrases = torch.cat([self.tokenizer(phrase) for phrase in self.positives]).to(self.config.device)
-            # self.pos_embeds = model.encode_text(tok_phrases)
+            tok_phrases = torch.cat([self.tokenizer(phrase) for phrase in self.positives]).to(self.config.device)
+            self.pos_embeds = model.encode_text(tok_phrases)
             tok_phrases = torch.cat([self.tokenizer(phrase) for phrase in self.negatives]).to(self.config.device)
             self.neg_embeds = model.encode_text(tok_phrases)
-        # self.pos_embeds /= self.pos_embeds.norm(dim=-1, keepdim=True)
+        self.pos_embeds /= self.pos_embeds.norm(dim=-1, keepdim=True)
         self.neg_embeds /= self.neg_embeds.norm(dim=-1, keepdim=True)
 
-        # assert (
-        #     self.pos_embeds.shape[1] == self.neg_embeds.shape[1]
-        # ), "Positive and negative embeddings must have the same dimensionality"
-        # assert (
-        #     self.pos_embeds.shape[1] == self.clip_n_dims
-        # ), "Embedding dimensionality must match the model dimensionality"
+        assert (
+            self.pos_embeds.shape[1] == self.neg_embeds.shape[1]
+        ), "Positive and negative embeddings must have the same dimensionality"
+        assert (
+            self.pos_embeds.shape[1] == self.clip_n_dims
+        ), "Embedding dimensionality must match the model dimensionality"
 
     @property
     def name(self) -> str:
@@ -74,8 +81,9 @@ class OpenCLIPNetwork(BaseImageEncoder):
     def embedding_dim(self) -> int:
         return self.config.clip_n_dims
     
-    # def gui_cb(self,element):
-    #     self.set_positives(element.value.split(";"))
+    def gui_cb(self,element):
+        # element = element.to(self.config.device)
+        self.set_positives(element.value.split(";"))
 
     def set_positives(self, text_list):
         self.positives = text_list
@@ -83,10 +91,12 @@ class OpenCLIPNetwork(BaseImageEncoder):
             tok_phrases = torch.cat([self.tokenizer(phrase) for phrase in self.positives]).to(self.config.device)
             self.pos_embeds = self.model.encode_text(tok_phrases)
         self.pos_embeds /= self.pos_embeds.norm(dim=-1, keepdim=True)
+        self.pos_embeds = self.pos_embeds.to(self.config.device)
 
     def get_relevancy(self, embed: torch.Tensor, positive_id: int) -> torch.Tensor:
-        phrases_embeds = torch.cat([self.pos_embeds, self.neg_embeds], dim=0)
+        phrases_embeds = torch.cat([self.pos_embeds, self.neg_embeds], dim=0).to(self.config.device)
         p = phrases_embeds.to(embed.dtype)  # phrases x 512
+        embed = embed.to(p.device)
         output = torch.mm(embed, p.T)  # rays x phrases
         positive_vals = output[..., positive_id : positive_id + 1]  # rays x 1
         negative_vals = output[..., len(self.positives) :]  # rays x N_phrase

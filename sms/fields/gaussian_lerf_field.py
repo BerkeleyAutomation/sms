@@ -28,7 +28,7 @@ from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.embedding import Embedding
 from nerfstudio.field_components.encodings import HashEncoding, NeRFEncoding, SHEncoding
-from l3gs.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
+from sms.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
 from nerfstudio.field_components.field_heads import (
     FieldHeadNames,
     PredNormalsFieldHead,
@@ -88,6 +88,7 @@ class GaussianLERFField(Field):
         grid_resolutions: Tuple[int] = ((16, 128), (128, 512)),
         n_features_level: int = 4,
         clip_n_dims: int = 512,
+        
         feature_dims: int = 64,
     ) -> None:
         super().__init__()
@@ -105,6 +106,7 @@ class GaussianLERFField(Field):
             ]
         )
         tot_out_dims = sum([e.n_output_dims for e in self.clip_encs])
+        instance_n_dims = 256
         print("Total output dims: ", tot_out_dims)
 
         # self.mlp_base_grid = HashEncoding(
@@ -127,6 +129,18 @@ class GaussianLERFField(Field):
                 "n_hidden_layers": 3,
             },
         )
+        
+        self.instance_net = tcnn.Network(
+            n_input_dims=tot_out_dims,
+            n_output_dims=instance_n_dims,
+            network_config={
+                "otype": "CutlassMLP",
+                "activation": "ReLU",
+                "output_activation": "None",
+                "n_neurons": 256,
+                "n_hidden_layers": 4,
+            },
+        )
 
         # self.dino_net = tcnn.Network(
         #     n_input_dims=tot_out_dims,
@@ -138,28 +152,6 @@ class GaussianLERFField(Field):
         #         "n_neurons": 256,
         #         "n_hidden_layers": 1,
         #     },
-        # )
-
-        # self.clip_feature_net = tcnn.Network(
-        #     n_input_dims=feature_dims+1,
-        #     n_output_dims=clip_n_dims,
-        #     network_config={
-        #         "otype": "CutlassMLP",
-        #         "activation": "ReLU",
-        #         "output_activation": "None",
-        #         "n_neurons": 264,
-        #         "n_hidden_layers": 3,
-        #     },
-        # )
-        #the same above network but with a torch.nn.Sequential of MLP with Relu actiavions between
-        # self.clip_feature_net = nn.Sequential(
-        #     nn.Linear(feature_dims+1, 256),
-        #     nn.ReLU(),
-        #     nn.Linear(256, 256),
-        #     nn.ReLU(),
-        #     nn.Linear(256, 256),
-        #     nn.ReLU(),
-        #     nn.Linear(256, clip_n_dims),
         # )
 
     @staticmethod
@@ -195,6 +187,10 @@ class GaussianLERFField(Field):
         # clip_pass = self.clip_net(torch.cat([encoding, clip_scales.view(-1, 1)], dim=-1))
         outputs[GaussianLERFFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
 
+        epsilon = 1e-5
+        instance_pass = self.instance_net(x).view(positions.shape[0], -1)
+        outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
+
         # dino_pass = self.dino_net(x).view(positions.shape[0], -1)
         # outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass
 
@@ -210,17 +206,26 @@ class GaussianLERFField(Field):
         # import pdb; pdb.set_trace()
         return encoding.to(torch.float32)
     
-    def get_outputs_from_feature(self, clip_features, clip_scale) -> Dict[GaussianLERFFieldHeadNames, Tensor]:
+    def get_outputs_from_feature(self, features, clip_scale, random_pixels = None) -> Dict[GaussianLERFFieldHeadNames, Tensor]:
         outputs = {}
         # import pdb; pdb.set_trace()
         
         #clip_features is Nx32, and clip scale is a number, I want to cat clip scale to the end of clip_features where clip scale is an int
         # clip_pass = self.clip_feature_net(torch.cat([clip_features, clip_scale.view(-1, 1)], dim=-1))
+        if random_pixels is not None:
+            clip_features = features[random_pixels]
+        else:
+            clip_features = features
         clip_pass = self.clip_net(torch.cat([clip_features, clip_scale.view(-1, 1)], dim=-1))
+
 
         # print("Max scale: ", clip_scale.max(), "Mean scale: ", clip_scale.mean(), "Min scale: ", clip_scale.min())
         # clip_pass = self.clip_feature_net(clip_features)
         outputs[GaussianLERFFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
+
+        epsilon = 1e-5
+        instance_pass = self.instance_net(features)
+        outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
         # dino_pass = self.dino_net(clip_features).view(clip_features.shape[0], -1)
         # outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass

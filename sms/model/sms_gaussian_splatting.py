@@ -34,6 +34,7 @@ except ImportError:
 from gsplat.cuda_legacy._wrapper import num_sh_bases
 from pytorch_msssim import SSIM
 from torch.nn import Parameter
+import torch.nn.functional as F
 from typing_extensions import Literal
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
@@ -138,19 +139,23 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """period of steps where refinement is turned off"""
     refine_every: int = 100
     """period of steps where gaussians are culled and densified"""
+    stop_refinement_after: int = 5000
+    """stop refinement after this many steps"""
     resolution_schedule: int = 3000
     """training starts at 1/d resolution, every n steps this is doubled"""
     background_color: Literal["random", "black", "white"] = "random"
     """Whether to randomize the background color."""
     num_downscales: int = 2
     """at the beginning, resolution is 1/2^d, where d is this number"""
-    cull_alpha_thresh: float = 0.1
+    cull_alpha_thresh: float = 0.08
     """threshold of opacity for culling gaussians. One can set it to a lower value (e.g. 0.005) for higher quality."""
-    cull_scale_thresh: float = 0.8
+    cull_scale_thresh: float = 0.9
     """threshold of scale for culling huge gaussians"""
+    cull_screen_size: float = 0.3
+    """if a gaussian is more than this percent of screen space, cull it"""
     continue_cull_post_densification: bool = True
     """If True, continue to cull gaussians post refinement"""
-    reset_alpha_every: int = 30
+    reset_alpha_every: int = 60
     """Every this many refinement steps, reset the alpha"""
     densify_grad_thresh: float = 0.0008
     """threshold of positional gradient norm for densifying gaussians"""
@@ -604,7 +609,10 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
     def refinement_after(self, optimizers: Optimizers, step):
         assert step == self.step
-        if self.step <= self.config.warmup_length:
+        skip = (
+            self.step <= self.config.warmup_length
+            or self.step >= self.config.stop_refinement_after)
+        if skip:
             return
         deleted_mask = None
         with torch.no_grad():
@@ -666,7 +674,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
             if self.step < self.config.stop_split_at and self.step % reset_interval == self.config.refine_every:
                 # Reset value is set to be twice of the cull_alpha_thresh
-                reset_value = self.config.cull_alpha_thresh * 2.0
+                reset_value = self.config.cull_alpha_thresh * 1.5
                 self.opacities.data = torch.clamp(
                     self.opacities.data,
                     max=torch.logit(torch.tensor(reset_value, device=self.device)).item(),
@@ -696,6 +704,10 @@ class smsGaussianSplattingModel(SplatfactoModel):
         if self.step > self.config.refine_every * self.config.reset_alpha_every:
             # cull huge ones
             toobigs = (torch.exp(self.scales).max(dim=-1).values > self.config.cull_scale_thresh).squeeze()
+            if self.step < self.config.stop_screen_size_at:
+                # cull big screen space
+                if self.max_2Dsize is not None:
+                    toobigs = toobigs | (self.max_2Dsize > self.config.cull_screen_size).squeeze()
             culls = culls | toobigs
             toobigs_count = torch.sum(toobigs).item()
         for name, param in self.gauss_params.items():
@@ -705,6 +717,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
             f"Culled {n_bef - self.num_points} gaussians "
             f"({below_alpha_count} below alpha thresh, {toobigs_count} too bigs, {self.num_points} remaining)"
         )
+        # print(f"Culled {n_bef - self.num_points} gaussians ")
+        # print(f"({below_alpha_count} below alpha thresh, {toobigs_count} too bigs, {self.num_points} remaining)")
 
         return culls
 
@@ -963,6 +977,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 # CLIP Relevancy Field #
                 ########################
                 reset_interval = self.config.reset_alpha_every * self.config.refine_every
+                field_output = None
                 if self.training and self.step>self.config.warmup_length and (self.step % reset_interval > self.num_train_data + self.config.refine_every  or self.step < (self.config.reset_alpha_every * self.config.refine_every)):
                     # with torch.no_grad():
                     clip_hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
@@ -1011,23 +1026,24 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     clip_scale = self.datamanager.curr_scale * torch.ones((self.random_pixels.shape[0],1),device=self.device)
                     clip_scale = clip_scale * clip_H * (depth_im.view(-1, 1)[self.random_pixels] / camera.fy.item())
 
-                    field_output = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(clip_H*clip_W, -1)[self.random_pixels], clip_scale)
+                    field_output = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(clip_H*clip_W, -1), clip_scale, self.random_pixels)
 
                     clip_output = field_output[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
 
                     outputs["clip"] = clip_output
                     outputs["clip_scale"] = clip_scale
 
+                    outputs["instance"] = field_output[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32)
+
+
                 if not self.training:
                     # N x B x 1; N
-                    max_across, self.best_scales = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
+                    max_across, self.best_scales, instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
 
                     for i in range(len(self.image_encoder.positives)):
                         max_across[i][max_across[i] < self.relevancy_thresh.value] = 0
-                        # relevancy_rasterized[relevancy_rasterized < 0.5] = 0
                         outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
-                        # outputs[f"relevancy_rasterized_{i}"] = relevancy_rasterized.view(H, W, -1)
-                        # outputs[f"best_scales_{i}"] = best_scales[i]
+                        outputs["groups"] = instances_out
                 
         # return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "clip": clip_im, "clip_scale": clip}  # type: ignore
         return outputs
@@ -1113,11 +1129,21 @@ class smsGaussianSplattingModel(SplatfactoModel):
             "scale_reg": scale_reg,
         }
 
+        margin = 1.0
         if self.training and 'clip' in outputs and 'clip' in batch: 
             unreduced_clip = self.config.clip_loss_weight * torch.nn.functional.huber_loss(
                 outputs["clip"], batch["clip"].to(self.device).to(torch.float32), delta=1.25, reduction="none"
             )
             loss_dict["clip_loss"] = unreduced_clip.sum(dim=-1).nanmean()
+
+            mask = batch["instance_masks"]
+            instance_loss = (
+                F.relu(
+                    margin - torch.norm(outputs["instance"][mask[0]].mean(dim=0) - outputs["instance"][mask[1]].mean(dim=0), p=2, dim=-1)
+                )
+            ).nansum()
+
+            loss_dict["instance_loss"] = instance_loss
 
         if self.training:
             # Add loss from camera optimizer
@@ -1378,7 +1404,9 @@ class smsGaussianSplattingModel(SplatfactoModel):
             # clip_output = clip_output / (clip_output.norm(dim=-1, keepdim=True) + 1e-6)
         for i, scale in enumerate(scales_list):
             with torch.no_grad():
-                clip_output_im = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
+                out = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device)) #[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
+                instances_output_im = out[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
+                clip_output_im = out[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
 
             for j in range(n_phrases):
                 if preset_scales is None or j == i:
@@ -1403,4 +1431,4 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         n_phrases_sims[j] = pos_prob
         # print(f"Best scales: {n_phrases_maxs}")#, Words: {self.image_encoder.positives}, Scale List: {scales_list}, All probs: {all_probs}")
         # import pdb; pdb.set_trace()
-        return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs)#, relevancy_rasterized
+        return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs), instances_output_im#, relevancy_rasterized

@@ -6,3 +6,4 @@ class GaussianLERFFieldHeadNames(Enum):
     HASHGRID = "hashgrid"
     CLIP = "clip"
     DINO = "dino"
+    INSTANCE = "instance"

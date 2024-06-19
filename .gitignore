@@ -8,4 +8,6 @@
 
 *.model
 
+*.pth
+
 __pycache__/
