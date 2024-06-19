@@ -185,14 +185,14 @@ class DeticDataloader():
                 filtered_idx.append(i)
         filtered_masks = torch.cat([masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0)
 
-        invert_masks = ~filtered_masks
-        # erode all masks using 3x3 kernel
-        eroded_masks = torch.conv2d(
-            invert_masks.float(),
-            torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
-            padding=1,
-        )
-        filtered_masks = ~(eroded_masks >= 5).squeeze(1)  # (num_masks, H, W)
+        # invert_masks = ~filtered_masks
+        # # erode all masks using 3x3 kernel
+        # eroded_masks = torch.conv2d(
+        #     invert_masks.float(),
+        #     torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
+        #     padding=1,
+        # )
+        # filtered_masks = ~(eroded_masks >= 5).squeeze(1)  # (num_masks, H, W)
 
                         
         outputs = {

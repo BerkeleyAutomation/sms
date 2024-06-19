@@ -486,16 +486,63 @@ class smsDataManager(DataManager, Generic[TDataset]):
                 #     self.random_pixels = torch.arange(scaled_height*scaled_width) * bg_mask[::self.config.clip_downscale_factor ** 2]
                 # else:
 
-                # Choose 2 random masks for contrastive loss
+                # Construct mask negative pairs for contrastive loss
                 with torch.no_grad():
-                    perm = torch.randperm(len(detic_out["masks_filtered"]))
-
-                    idx = perm[:2]
-                    masks = detic_out["masks_filtered"][idx].squeeze(1)
-                    msk1 = F.interpolate(masks[0].unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(-1)
-                    msk2 = F.interpolate(masks[1].unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(-1)
+                    # num_masks_to_sample = 10
+                    masks = detic_out["masks_filtered"].squeeze(1) # masks: [num_masks, H, W]
                     # import pdb; pdb.set_trace()
-                    data["instance_masks"] = torch.stack((msk1, msk2))
+                    assert len(masks) > 1, "Requires more than 1 mask"
+                    assert masks.shape[1] == H and masks.shape[2] == W, "Mask shape mismatch"
+                    assert len(masks.shape) == 3, "Instance masks should be a 2D tensor."
+                    # perm = torch.randperm(len(masks))
+                    # idx = perm[:num_masks_to_sample]
+                    # num_masks = len(detic_out["masks_filtered"])
+
+                    def create_mask_id(masks):
+                        num_masks, H, W = masks.shape
+                        mask_id = torch.full((H, W), -1, dtype=torch.int)  # Initialize with -1
+                        for mask_idx in range(num_masks):
+                            mask = masks[mask_idx]
+                            mask_id[mask == 1] = mask_idx
+                        return mask_id
+                    
+                    mask_id = F.interpolate(create_mask_id(masks).unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').view(-1)
+                    
+                    batch_size = scaled_height * scaled_width
+                    mask_id_flat = mask_id.view(-1)  # Shape: [batch_size]
+                    labels1_expanded = mask_id_flat.unsqueeze(1).expand(-1, batch_size)
+                    labels2_expanded = mask_id_flat.unsqueeze(0).expand(batch_size, -1)
+
+                    mask_full_positive = labels1_expanded == labels2_expanded
+                    mask_full_negative = ~mask_full_positive
+
+                    # No need for block mask as we have a single image, but let's apply upper triangular mask to avoid double-counting
+                    block_mask = torch.triu(torch.ones((batch_size, batch_size), dtype=torch.bool), diagonal=0).to(mask_id.device)
+
+                    # Apply block mask to positive and negative masks
+                    # valid_positive_mask = mask_full_positive * block_mask
+                    valid_negative_mask = mask_full_negative * block_mask
+
+                    # Exclude -1 pairs
+                    # valid_positive_mask = valid_positive_mask & (mask_id_flat.unsqueeze(1) != -1) & (mask_id_flat.unsqueeze(0) != -1)
+                    valid_negative_mask = valid_negative_mask & (mask_id_flat.unsqueeze(1) != -1) & (mask_id_flat.unsqueeze(0) != -1)
+
+                    # # Example features (replace with actual computation)
+                    # feature_dim = 128
+                    # instance = torch.randn(batch_size, feature_dim, device=mask_id.device)
+
+                    # Compute contrastive loss for negative pairs
+                    # margin = 1.0
+                    
+                    mask = torch.where(valid_negative_mask)
+                    # import pdb; pdb.set_trace()
+                    if len(mask[0]) < 4000:
+                        samp = len(mask[0])
+                    else:
+                        samp = 4000
+                    random_perm = torch.randperm(len(mask[0]))[:samp]
+                    mask = (mask[0][random_perm], mask[1][random_perm])
+                    data["instance_masks"] = mask
 
                 self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.25)]
 

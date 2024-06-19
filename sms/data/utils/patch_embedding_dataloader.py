@@ -63,7 +63,6 @@ class PatchEmbeddingDataloader(FeatureDataloader):
             padding=self.padding,
         ).to(self.device)
 
-
     def add_images(self,image_list):
         img_embeds = []
         for img in tqdm(image_list, desc="Embedding images", leave=False):
