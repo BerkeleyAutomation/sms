@@ -2,8 +2,8 @@ import json
 
 import numpy as np
 import torch
-from data.utils.feature_dataloader import FeatureDataloader
-from encoders.image_encoder import BaseImageEncoder
+from sms.data.utils.feature_dataloader import FeatureDataloader
+from sms.encoders.image_encoder import BaseImageEncoder
 from tqdm import tqdm
 
 
@@ -103,7 +103,7 @@ class PatchEmbeddingDataloader(FeatureDataloader):
     def _embed_clip_tiles(self, image, unfold_func):
         assert len(image.shape) == 4 and image.shape[0]==1
         # image augmentation: slow-ish (0.02s for 600x800 image per augmentation)
-        aug_imgs = image #.permute(0,3,1,2) #input to unfold should be N x 3 x H x W 
+        aug_imgs = image.permute(0,3,1,2) #input to unfold should be N x 3 x H x W 
         # import pdb; pdb.set_trace()
 
         tiles = unfold_func(aug_imgs).permute(2, 0, 1).reshape(-1, 3, self.kernel_size, self.kernel_size).to(self.device)

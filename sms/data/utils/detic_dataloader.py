@@ -39,16 +39,18 @@ from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
 
 # Detic libraries 
-from detic.modeling.text.text_encoder import build_text_encoder
+from sms.data.utils.Detic.detic.modeling.text.text_encoder import build_text_encoder
 from collections import defaultdict
 from centernet.config import add_centernet_config
-from detic.config import add_detic_config
-from detic.modeling.utils import reset_cls_test
+from sms.data.utils.Detic.detic.config import add_detic_config
+from sms.data.utils.Detic.detic.modeling.utils import reset_cls_test
 from sklearn.cluster import DBSCAN
 import matplotlib.patches as patches
+from segment_anything import sam_model_registry, SamPredictor
 
 class DeticDataloader():
-
+    def __init__(self):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     def create(self):
         # Build the detector and download our pretrained weights
         cfg = get_cfg()
@@ -61,6 +63,14 @@ class DeticDataloader():
         cfg.MODEL.ROI_HEADS.ONE_CLASS_PER_PROPOSAL = True # For better visualization purpose. Set to False for all classes.
         # cfg.MODEL.DEVICE='cpu' # uncomment this to use cpu-only mode.
         self.detic_predictor = DefaultPredictor(cfg)
+
+        sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
+        model_type = "vit_h"
+        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        sam.to(device=self.device)
+        print('SAM + Detic on device: ', self.device)
+        self.sam_predictor = SamPredictor(sam)
+        self.text_encoder = build_text_encoder(pretrain=True)
 
     def default_vocab(self):
         # detic_predictor = self.detic_predictor
@@ -82,16 +92,35 @@ class DeticDataloader():
         vocabulary = 'lvis' # change to 'lvis', 'objects365', 'openimages', or 'coco'
         self.metadata = MetadataCatalog.get(BUILDIN_METADATA_PATH[vocabulary])
         classifier = BUILDIN_CLASSIFIER[vocabulary]
+
         num_classes = len(self.metadata.thing_classes)
         reset_cls_test(self.detic_predictor.model, classifier, num_classes)
 
-
     def get_clip_embeddings(self, vocabulary, prompt='a '):
-        text_encoder = build_text_encoder(pretrain=True)
-        text_encoder.eval()
+        self.text_encoder.eval()
         texts = [prompt + x for x in vocabulary]
-        emb = text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
+        emb = self.text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
         return emb
+
+    # def SAM_predictors(self, device):
+    #     sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
+    #     model_type = "vit_h"
+    #     device = device
+    #     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    #     sam.to(device=device)
+    #     self.sam_predictor = SamPredictor(sam)
+    
+    def SAM(self, im, boxes, class_idx = None, metadata = None):
+        self.sam_predictor.set_image(im)
+        input_boxes = torch.tensor(boxes, device=self.sam_predictor.device)
+        transformed_boxes = self.sam_predictor.transform.apply_boxes_torch(input_boxes, im.shape[:2])
+        masks, _, _ = self.sam_predictor.predict_torch(
+            point_coords=None,
+            point_labels=None,
+            boxes=transformed_boxes,
+            multimask_output=False,
+        )
+        return masks
 
     def visualize_detic(self, output):
         output_im = output.get_image()[:, :, ::-1]
@@ -118,16 +147,37 @@ class DeticDataloader():
         if im is None:
             print("Error: Unable to read the image file")
 
+        H, W = im.shape[:2]
+
         # Run model and show results
         output = self.detic_predictor(im[:, :, ::-1])  # Detic expects BGR images.
         v = Visualizer(im, self.metadata)
         out = v.draw_instance_predictions(output["instances"].to('cpu'))
         instances = output["instances"].to('cpu')
         boxes = instances.pred_boxes.tensor.numpy()
-        classes = instances.pred_classes.numpy()
-        # if visualize:
-            # visualize_detic(out)
-        return out, boxes, classes
+        class_idx = instances.pred_classes.numpy()
+        class_name = [self.metadata.thing_classes[idx] for idx in class_idx]
+        clip_embeds = self.get_clip_embeddings(class_name)
+
+        masks = None
+        components = torch.zeros(H, W)
+        if len(boxes) > 0:
+            # Only run SAM if there are bboxes
+            masks = self.SAM(im, boxes)
+            for i in range(masks.shape[0]):
+                if torch.sum(masks[i][0]) <= H*W/3.5:
+                    components[masks[i][0]] = i + 1
+
+        outputs = {
+            "vis": out,
+            "boxes": boxes,
+            "masks": masks,
+            "class_idx": class_idx,
+            "class_name": class_name,
+            "clip_embeds": clip_embeds,
+            "components": components
+        }
+        return outputs
 
 
     def show_mask(self, mask, ax, random_color=False):
