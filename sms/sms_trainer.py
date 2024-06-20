@@ -144,7 +144,7 @@ class TrainerConfig(ExperimentConfig):
     """Optionally log gradients during training"""
     gradient_accumulation_steps: int = 1
     """Number of steps to accumulate gradients over."""
-    image_downscale_factor: int = 2
+    image_downscale_factor: int = 1
     """Anti-aliased image downresolution factor."""
 
 class TrainerNode(Node):
@@ -701,7 +701,7 @@ class Trainer:
             #     # import pdb; pdb.set_trace()
             #     # self.points_queue.extend(points)
             #     frame1 = self.pipeline.datamanager.train_dataset.cameras[0]
-            #     deprojected, colors = self.deproject_droidslam_point_cloud(clrs, points, frame1, detic_out)
+            #     deprojected, colors = self.deproject_droidslam_point_cloud(clrs, points, frame1)
             #     self.deprojected_queue.append(deprojected)
             #     self.colors_queue.append(colors)
             # ZED
@@ -718,24 +718,13 @@ class Trainer:
             if self.done_scale_calc and msg.depth.encoding == '64FC1': # and idx+1 % rs_interval == 0::
                 # print("TRIGSTORE CAM")
                 depth = torch.tensor(self.cvbridge.imgmsg_to_cv2(msg.depth,'64FC1').astype(np.float32),dtype = torch.float32)
-                
-                # (debug) save depth image to file
-                # import pdb; pdb.set_trace()
-                # import matplotlib.pyplot as plt
-                # plt.imsave(f"depth_{idx}.jpg", depth.numpy())
-                # plt.imsave(f"image_{idx}.jpg", image_data.numpy()/255.0)
-                # detectvis = detic_out['vis']
-                # detectvis = detic_out['vis'].get_image()
-                # plt.imsave(f"detic_{idx}.jpg", detectvis)
-                # import pdb; pdb.set_trace()
+        
                 
                 depth = depth.unsqueeze(0).unsqueeze(0)
                 
                 deprojected, colors, components = self.deproject_to_RGB_point_cloud(image_data, depth, dataset_cam, detic_out)
                 self.deprojected_queue.append(deprojected)
                 self.colors_queue.append(colors)
-                # self.components_queue.append(components)
-                # import pdb; pdb.set_trace()
 
 
     def update_poses(self, BA_deltas, start_idx):

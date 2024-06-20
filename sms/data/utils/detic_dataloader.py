@@ -7,7 +7,7 @@ import pickle
 import random
 from typing import List, Dict, Tuple
 import sys
-
+import time
 import cv2
 from sms.data.utils.feature_dataloader import FeatureDataloader
 import numpy as np
@@ -152,15 +152,16 @@ class DeticDataloader():
         H, W = im.shape[:2]
 
         # Run model and show results
+        start_time = time.time()
         output = self.detic_predictor(im[:, :, ::-1])  # Detic expects BGR images.
-        # import pdb; pdb.set_trace()
+        print("Inference time: ", time.time() - start_time)
         v = Visualizer(im, self.metadata)
         out = v.draw_instance_predictions(output["instances"].to('cpu'))
         instances = output["instances"].to('cpu')
         boxes = instances.pred_boxes.tensor.numpy()
-        class_idx = instances.pred_classes.numpy()
-        class_name = [self.metadata.thing_classes[idx] for idx in class_idx]
-        clip_embeds = self.get_clip_embeddings(class_name)
+        # class_idx = instances.pred_classes.numpy()
+        # class_name = [self.metadata.thing_classes[idx] for idx in class_idx]
+        # clip_embeds = self.get_clip_embeddings(class_name)
 
         masks = None
         components = torch.zeros(H, W)
@@ -185,14 +186,14 @@ class DeticDataloader():
                 filtered_idx.append(i)
         filtered_masks = torch.cat([masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0)
 
-        invert_masks = ~filtered_masks
-        # erode all masks using 3x3 kernel
-        eroded_masks = torch.conv2d(
-            invert_masks.float(),
-            torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
-            padding=1,
-        )
-        filtered_masks = ~(eroded_masks >= 5).squeeze(1)  # (num_masks, H, W)
+        # invert_masks = ~filtered_masks
+        # # erode all masks using 3x3 kernel
+        # eroded_masks = torch.conv2d(
+        #     invert_masks.float(),
+        #     torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
+        #     padding=1,
+        # )
+        # filtered_masks = ~(eroded_masks >= 5).squeeze(1)  # (num_masks, H, W)
 
                         
         outputs = {

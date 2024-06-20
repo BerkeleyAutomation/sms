@@ -147,17 +147,17 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """Whether to randomize the background color."""
     num_downscales: int = 2
     """at the beginning, resolution is 1/2^d, where d is this number"""
-    cull_alpha_thresh: float = 0.08
+    cull_alpha_thresh: float = 0.1
     """threshold of opacity for culling gaussians. One can set it to a lower value (e.g. 0.005) for higher quality."""
-    cull_scale_thresh: float = 0.9
+    cull_scale_thresh: float = 0.6
     """threshold of scale for culling huge gaussians"""
-    cull_screen_size: float = 0.3
+    cull_screen_size: float = 0.2
     """if a gaussian is more than this percent of screen space, cull it"""
     continue_cull_post_densification: bool = True
     """If True, continue to cull gaussians post refinement"""
     reset_alpha_every: int = 60
     """Every this many refinement steps, reset the alpha"""
-    densify_grad_thresh: float = 0.0008
+    densify_grad_thresh: float = 0.001
     """threshold of positional gradient norm for densifying gaussians"""
     densify_size_thresh: float = 0.01
     """below this size, gaussians are *duplicated*, otherwise split"""
@@ -165,7 +165,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """number of samples to split gaussians into"""
     sh_degree_interval: int = 1000
     """every n intervals turn on another sh degree"""
-    split_screen_size: float = 0.05
+    split_screen_size: float = 0.09
     """if a gaussian is more than this percent of screen space, split it"""
     stop_screen_size_at: int = 4000
     """stop culling/splitting at this step WRT screen size of gaussians"""
@@ -185,7 +185,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """maximum degree of spherical harmonics to use"""
     clip_loss_weight: float = 0.1
     """weight of clip loss"""
-    use_scale_regularization: bool = False
+    use_scale_regularization: bool = True
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
     max_gauss_ratio: float = 10.0
     """threshold of ratio of gaussian max to min scale before applying regularization
@@ -314,69 +314,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.viser_scale_ratio = 0.1
         self.frame_on_word = ViewerButton("Localize Query", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
-
-
-    @property
-    def colors(self):
-        if self.config.sh_degree > 0:
-            return SH2RGB(self.features_dc)
-        else:
-            return torch.sigmoid(self.features_dc)
-
-    @property
-    def shs_0(self):
-        return self.features_dc
-
-    @property
-    def shs_rest(self):
-        return self.features_rest
-
-    @property
-    def num_points(self):
-        return self.means.shape[0]
-
-    @property
-    def means(self):
-        return self.gauss_params["means"]
-
-    @property
-    def scales(self):
-        return self.gauss_params["scales"]
-
-    @property
-    def quats(self):
-        return self.gauss_params["quats"]
-
-    @property
-    def features_dc(self):
-        return self.gauss_params["features_dc"]
-
-    @property
-    def features_rest(self):
-        return self.gauss_params["features_rest"]
-
-    @property
-    def opacities(self):
-        return self.gauss_params["opacities"]
-
-    # @property
-    # def components(self):
-    #     return self.gauss_params["components"]
-
-    def load_state_dict(self, dict, **kwargs):  # type: ignore
-        # resize the parameters to match the new number of points
-        self.step = 30000
-        if "means" in dict:
-            # For backwards compatibility, we remap the names of parameters from
-            # means->gauss_params.means since old checkpoints have that format
-            for p in ["means", "scales", "quats", "features_dc", "features_rest", "opacities"]:
-                dict[f"gauss_params.{p}"] = dict[p]
-        newp = dict["gauss_params.means"].shape[0]
-        for name, param in self.gauss_params.items():
-            old_shape = param.shape
-            new_shape = (newp,) + old_shape[1:]
-            self.gauss_params[name] = torch.nn.Parameter(torch.zeros(new_shape, device=self.device))
-        super().load_state_dict(dict, **kwargs)
 
     def k_nearest_sklearn(self, x: torch.Tensor, k: int, include_self: bool = False):
         """
@@ -1043,6 +980,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     for i in range(len(self.image_encoder.positives)):
                         max_across[i][max_across[i] < self.relevancy_thresh.value] = 0
                         outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
+
+                        assert not torch.isnan(instances_out).any()
                         outputs["groups"] = instances_out
                 
         # return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "clip": clip_im, "clip_scale": clip}  # type: ignore
@@ -1137,13 +1076,17 @@ class smsGaussianSplattingModel(SplatfactoModel):
             loss_dict["clip_loss"] = unreduced_clip.sum(dim=-1).nanmean()
 
             mask = batch["instance_masks"]
-            instance_loss = (
-                F.relu(
-                    margin - torch.norm(outputs["instance"][mask[0]].mean(dim=0) - outputs["instance"][mask[1]].mean(dim=0), p=2, dim=-1)
-                )
-            ).nansum()
+            instance_loss = torch.tensor(0.0, device=self.device)
 
-            loss_dict["instance_loss"] = instance_loss
+            idx = torch.randperm(len(mask))
+
+            for i in range(len(mask)-1):
+                instance_loss += (
+                    F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
+            loss = instance_loss / (1.6*len(mask)-1)
+
+            assert not torch.isnan(loss)
+            loss_dict["instance_loss"] = loss
 
         if self.training:
             # Add loss from camera optimizer
@@ -1340,7 +1283,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
             self.viewer_control.viser_server.add_point_cloud("Centroid", self._crop_center_init / self.viser_scale_ratio, np.array([0,0,0]), 0.1)
 
-    def reset_crop_cb(self,element):
+    def reset_crop_cb(self, element):
         self.crop_ids = None#torch.ones_like(self.means[:,0],dtype=torch.bool)
         self.means.data = self.original_means
         self._crop_center_init = None
@@ -1383,25 +1326,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         # set some threshold to disregrad small gaussians for faster rendering.
                         # radius_clip=3.0,
             )
-            # clip_output = rasterize_gaussians(
-            #                 xys,
-            #                 depths,
-            #                 radii,
-            #                 conics,
-            #                 num_tiles_hit,
-            #                 # self.gaussian_lerf_field.get_outputs_from_feature(self.clip_hash / self.clip_hash.norm(dim=-1, keepdim=True), scale * torch.ones(h*w, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].view(self.num_points, -1).to(dtype=torch.float32),
-            #                 # self.clip_hash / self.clip_hash.norm(dim=-1, keepdim=True),
-            #                 # clip_hash_encoding / clip_hash_encoding.norm(dim=-1, keepdim=True),
-            #                 clip_hash_encoding,
-            #                 opacities,
-            #                 h,
-            #                 w,
-            #                 BLOCK_WIDTH,
-            #                 # torch.zeros(self.image_encoder.embedding_dim, device=self.device),
-            #                 torch.zeros(clip_hash_encoding.shape[1], device=self.device),
-            #             )
-            # Normalize the clip output
-            # clip_output = clip_output / (clip_output.norm(dim=-1, keepdim=True) + 1e-6)
+
         for i, scale in enumerate(scales_list):
             with torch.no_grad():
                 out = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device)) #[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
@@ -1410,19 +1335,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
             for j in range(n_phrases):
                 if preset_scales is None or j == i:
-                    # relevancy_rasterized = NDRasterizeGaussians.apply(
-                    #         xys,
-                    #         depths,
-                    #         radii,
-                    #         conics,
-                    #         num_tiles_hit,
-                    #         self.image_encoder.get_relevancy(self.gaussian_lerf_field.get_outputs_from_feature(self.clip_hash / self.clip_hash.norm(dim=-1, keepdim=True), scale * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].view(self.num_points, -1).to(dtype=torch.float32), j)[..., 0:1],
-                    #         opacities,
-                    #         h,
-                    #         w,
-                    #         torch.zeros(1, device=self.device),
-                    #     )
-                    
+
                     probs = self.image_encoder.get_relevancy(clip_output_im.view(-1, self.image_encoder.embedding_dim), j)
                     pos_prob = probs[..., 0:1]
                     all_probs.append((pos_prob.max(), scale))

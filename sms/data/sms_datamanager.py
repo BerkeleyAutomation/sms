@@ -85,6 +85,8 @@ class smsDataManagerConfig(DataManagerConfig):
     """The stride scaler for patch-based training"""
     network: BaseImageEncoderConfig = BaseImageEncoderConfig()
     """specifies the vision-language network config"""
+    num_random_masks: int = 20
+    """Number of random masks to sample for contrastive loss"""
     clip_downscale_factor: int = 4
     """The downscale factor for the clip pyramid"""
 
@@ -486,18 +488,20 @@ class smsDataManager(DataManager, Generic[TDataset]):
                 #     self.random_pixels = torch.arange(scaled_height*scaled_width) * bg_mask[::self.config.clip_downscale_factor ** 2]
                 # else:
 
-                # Choose 2 random masks for contrastive loss
+                # Choose random masks for contrastive loss
                 with torch.no_grad():
-                    perm = torch.randperm(len(detic_out["masks_filtered"]))
+                    detic_masks = detic_out["masks_filtered"]
+                    perm = torch.randperm(len(detic_masks))
+                    assert len(detic_masks) > 0, "No masks found"
 
-                    idx = perm[:2]
-                    masks = detic_out["masks_filtered"][idx].squeeze(1)
-                    msk1 = F.interpolate(masks[0].unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(-1)
-                    msk2 = F.interpolate(masks[1].unsqueeze(0).unsqueeze(0).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(-1)
-                    # import pdb; pdb.set_trace()
-                    data["instance_masks"] = torch.stack((msk1, msk2))
+                    num_samp = min(len(detic_masks), self.config.num_random_masks)
+                    idx = perm[:num_samp]
+                    masks = detic_masks[idx].squeeze(1)
 
-                self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.25)]
+                    masks = F.interpolate(masks.unsqueeze(1).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(num_samp, -1)
+                    data["instance_masks"] = masks.squeeze(1)
+
+                self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.20)]
 
                 x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
                 y = torch.arange(0, scaled_height*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1)

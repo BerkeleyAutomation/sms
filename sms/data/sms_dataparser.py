@@ -33,7 +33,7 @@ class smsDataParserConfig(DataParserConfig):
     # img_width: int = 848 // 4
     img_height: int = 480
     img_width: int = 848
-    image_downscale_factor: int = 2
+    image_downscale_factor: int = 1
     """Anti-aliased image downresolution factor."""
     depth_height: int = 480
     depth_width: int = 848
