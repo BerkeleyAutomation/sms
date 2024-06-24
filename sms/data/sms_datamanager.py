@@ -114,6 +114,7 @@ class smsDataManager(DataManager, Generic[TDataset]):
         **kwargs,
     ):
         self.config = config
+        self.loaded_ckpt = False
         self.network = network
         self.device = device
         self.world_size = world_size
@@ -631,7 +632,8 @@ class smsDataManager(DataManager, Generic[TDataset]):
         print("Detic time: ", detic_time)
 
         # Antialiased downresolution
-        img = torch.from_numpy(self.antialiased_downres(img, downscale_factor, True)).float()
+        if downscale_factor > 1:
+            img = torch.from_numpy(self.antialiased_downres(img, downscale_factor, True)).float()
         self.train_dataset.add_image(img,depth,cam, detic_outputs)
         self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
         

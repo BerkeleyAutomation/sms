@@ -58,7 +58,15 @@ from sms.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldH
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 from nerfstudio.utils.colormaps import apply_colormap
 import viser.transforms as vtf
+from pathlib import Path
+from cuml.cluster.hdbscan import HDBSCAN
+import cv2
+from nerfstudio.models.splatfacto import RGB2SH
+import open3d as o3d
+import time
 
+from sklearn.preprocessing import QuantileTransformer
+from sklearn.neighbors import NearestNeighbors
 
 def random_quat_tensor(N):
     """
@@ -109,6 +117,15 @@ def resize_image(image: torch.Tensor, d: int):
     weight = (1.0 / (d * d)) * torch.ones((1, 1, d, d), dtype=torch.float32, device=image.device)
     return tf.conv2d(image.permute(2, 0, 1)[:, None, ...], weight, stride=d).squeeze(1).permute(1, 2, 0)
 
+def generate_random_colors(N=5000) -> torch.Tensor:
+    """Generate random colors for visualization"""
+    hs = np.random.uniform(0, 1, size=(N, 1))
+    ss = np.random.uniform(0.6, 0.61, size=(N, 1))
+    vs = np.random.uniform(0.84, 0.95, size=(N, 1))
+    hsv = np.concatenate([hs, ss, vs], axis=-1)
+    # convert to rgb
+    rgb = cv2.cvtColor((hsv * 255).astype(np.uint8)[None, ...], cv2.COLOR_HSV2RGB)
+    return torch.Tensor(rgb.squeeze() / 255.0)
 
 @torch.compile()
 def get_viewmat(optimized_camera_to_world):
@@ -127,8 +144,6 @@ def get_viewmat(optimized_camera_to_world):
     viewmat[:, :3, :3] = R_inv
     viewmat[:, :3, 3:4] = T_inv
     return viewmat
-
-
 
 @dataclass
 class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
@@ -229,6 +244,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         # self.components_new = []
         # self.max_comp = 0
         self.postBA = False
+        self.loaded_ckpt = False
         self.localized_query = None
 
     def populate_modules(self):
@@ -312,7 +328,15 @@ class smsGaussianSplattingModel(SplatfactoModel):
         
         self.viewer_control = ViewerControl()
         self.viser_scale_ratio = 0.1
-        self.frame_on_word = ViewerButton("Localize Query", cb_hook=self.localize_query_cb)
+        # self.crop_to_word = ViewerButton("Crop gaussians to word", cb_hook=self.crop_to_word_cb)
+        self.colormap = generate_random_colors()
+        self.cluster_scene = ViewerButton(name="Cluster Scene", cb_hook=self._cluster_scene, disabled=False)
+        self.toggle_rgb_cluster = ViewerButton(name="Toggle RGB/Cluster", cb_hook=self._togglergbcluster, disabled=False)
+        self.cluster_scene_shuffle_colors = ViewerButton(name="Reshuffle Cluster Colors", cb_hook=self._reshuffle_cluster_colors, disabled=False)
+        self.cluster_labels = None
+        self.rgb1_cluster0 = True
+        self.temp_opacities = None
+        self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
 
     def k_nearest_sklearn(self, x: torch.Tensor, k: int, include_self: bool = False):
@@ -848,6 +872,31 @@ class smsGaussianSplattingModel(SplatfactoModel):
             quats_crop = self.quats
 
         colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
+
+        if not self.rgb1_cluster0 and self.cluster_labels is not None:
+            labels = self.cluster_labels.numpy()
+            features_dc = self.gauss_params['features_dc'].detach().clone()
+            features_rest = self.gauss_params['features_rest'].detach().clone()
+            for c_id in range(0, labels.max().astype(int) + 1):
+                # set the colors of the gaussians accordingly using colormap from matplotlib
+                cluster_mask = np.where(labels == c_id)
+                features_dc[cluster_mask] = RGB2SH(self.colormap[c_id, :3].to(self.gauss_params['features_dc']))
+                features_rest[cluster_mask] = 0
+            if crop_ids is not None:
+                colors_crop = torch.cat((features_dc[:, None, :][crop_ids], features_rest[crop_ids]), dim=1)
+            else:
+                colors_crop = torch.cat((features_dc[:, None, :], features_rest), dim=1)
+
+        for i in range(len(self.image_encoder.positives)):
+            if self.image_encoder.positives[i] == '':
+                    self.temp_opacities = None
+        
+        if self.cluster_labels is not None and self.temp_opacities is not None:
+            if crop_ids is not None:
+                opacities_crop = self.temp_opacities[crop_ids]
+            else:
+                opacities_crop = self.temp_opacities
+
         BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
         K = camera.get_intrinsics_matrices().cuda()
         K[:, :2, :] *= camera_scale_fac
@@ -905,8 +954,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
         outputs["accumulation"] = alpha.squeeze(0)
         outputs["background"] = background
 
-        if self.datamanager.use_clip:
-            if self.step - self.datamanager.lerf_step > 500:
+        if self.datamanager.use_clip or self.loaded_ckpt:
+            if (self.step - self.datamanager.lerf_step > 500) or self.loaded_ckpt:
                 if camera.metadata is not None:
                     if "clip_downscale_factor" not in camera.metadata:
                         return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background}
@@ -921,11 +970,12 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     # downscale_factor = camera.metadata["clip_downscale_factor"]
                     # print("K: ", K)
 
-                    rgb_downscale = self.datamanager.train_dataset._dataparser_outputs.metadata['image_downscale_factor']
+                    # import pdb; pdb.set_trace()
+                    if 'image_downscale_factor' in self.datamanager.train_dataset._dataparser_outputs.metadata.keys():
+                        rgb_downscale = self.datamanager.train_dataset._dataparser_outputs.metadata['image_downscale_factor']
+                        downscale_factor = camera.metadata["clip_downscale_factor"] / rgb_downscale
+                        camera.rescale_output_resolution(1 / downscale_factor)
 
-                    downscale_factor = camera.metadata["clip_downscale_factor"] / rgb_downscale
-
-                    camera.rescale_output_resolution(1 / downscale_factor)
                     clip_W, clip_H = camera.width.item(), camera.height.item()
                     # print(f"clip_W {clip_W} clip_H {clip_H}")
                     clipK = camera.get_intrinsics_matrices().cuda()
@@ -955,7 +1005,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     )
 
                     # rescale the camera back to original dimensions
-                    camera.rescale_output_resolution(downscale_factor)
+                    if 'image_downscale_factor' in self.datamanager.train_dataset._dataparser_outputs.metadata.keys():
+                        camera.rescale_output_resolution(downscale_factor)
                     
 
                     self.random_pixels = self.datamanager.random_pixels.to(self.device)
@@ -976,13 +1027,18 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 if not self.training:
                     # N x B x 1; N
                     max_across, self.best_scales, instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
+                    
+                    # assert not torch.isnan(instances_out).any()
+                    if not torch.isnan(instances_out).any():
+                        outputs["group_feats"] = instances_out
+                    else:
+                        print("instance loss may be nan")
 
                     for i in range(len(self.image_encoder.positives)):
+                        # import pdb; pdb.set_trace()
                         max_across[i][max_across[i] < self.relevancy_thresh.value] = 0
                         outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
 
-                        assert not torch.isnan(instances_out).any()
-                        outputs["groups"] = instances_out
                 
         # return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "clip": clip_im, "clip_scale": clip}  # type: ignore
         return outputs
@@ -1076,17 +1132,18 @@ class smsGaussianSplattingModel(SplatfactoModel):
             loss_dict["clip_loss"] = unreduced_clip.sum(dim=-1).nanmean()
 
             mask = batch["instance_masks"]
-            instance_loss = torch.tensor(0.0, device=self.device)
+            if len(mask) > 2:
+                instance_loss = torch.tensor(0.0, device=self.device)
 
-            idx = torch.randperm(len(mask))
+                idx = torch.randperm(len(mask))
 
-            for i in range(len(mask)-1):
-                instance_loss += (
-                    F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
-            loss = instance_loss / (1.6*len(mask)-1)
+                for i in range(len(mask)-1):
+                    instance_loss += (
+                        F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
+                loss = instance_loss / (1.6*len(mask)-1)
 
-            assert not torch.isnan(loss)
-            loss_dict["instance_loss"] = loss
+                assert not torch.isnan(loss)
+                loss_dict["instance_loss"] = loss
 
         if self.training:
             # Add loss from camera optimizer
@@ -1145,81 +1202,65 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
 
     def localize_query_cb(self,element):
+        if len(self.image_encoder.positives) == 0:
+            return
         with torch.no_grad():
-            # clip_feats = self.gaussian_lerf_field.get_outputs_from_feature(self.clip_hash / self.clip_hash.norm(dim=-1,keepdim=True), self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
-            # clip_feats = self.gaussian_lerf_field.get_outputs(self.means, self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
-            # clip_feats = self.gaussian_lerf_field.get_outputs(self.means, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
 
             # Do K nearest neighbors for each point and then avg the clip hash for each point based on the KNN
-            # import pdb; pdb.set_trace()
-            means_freeze = self.means.data.clone().detach()
+            means_freeze = self.means.data.detach().clone()
             distances, indicies = self.k_nearest_sklearn(means_freeze, 3, True)
             distances = torch.from_numpy(distances).to(self.device)
             indicies = torch.from_numpy(indicies).view(-1)
             weights = torch.sigmoid(self.opacities[indicies].view(-1, 4))
             weights = torch.nn.Softmax(dim=-1)(weights)
             points = means_freeze[indicies]
-            # clip_hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
             clip_hash_encoding = self.gaussian_lerf_field.get_hash(points)
             clip_hash_encoding = clip_hash_encoding.view(-1, 4, clip_hash_encoding.shape[1])
             clip_hash_encoding = (clip_hash_encoding * weights.unsqueeze(-1))
             clip_hash_encoding = clip_hash_encoding.sum(dim=1)
             clip_feats = self.gaussian_lerf_field.get_outputs_from_feature(clip_hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
             relevancy = self.image_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.num_points, -1)
-            # color = apply_colormap(relevancy[..., 0:1])
-            # self.viewer_control.viser_server.add_point_cloud("relevancy", self.means.numpy(force=True) * 10, color.numpy(force=True), 0.01)
+            
+            labels = self.cluster_labels.numpy()
+            avg_relevancy_per_cluster = []
+            for c_id in range(0, labels.max().astype(int) + 1):
+                # set the colors of the gaussians accordingly using colormap from matplotlib
+                cluster_mask = np.where(labels == c_id)
 
-            # Add a slider to debug the relevancy values
+                # import pdb; pdb.set_trace()
+                avg_relevancy_per_cluster.append(relevancy[cluster_mask][..., 0].mean().item())
+                # features_dc[cluster_mask] = RGB2SH(self.colormap[c_id, :3].to(self.gauss_params['features_dc']))
+                # features_rest[cluster_mask] = 0
+            cluster_argmax = np.array(avg_relevancy_per_cluster).argmax()
+
+            cluster_mask = np.where(labels != cluster_argmax)
+            # import pdb; pdb.set_trace()
+            self.temp_opacities = self.opacities.data.clone()
+            self.temp_opacities[cluster_mask[0]] = self.opacities.data.min()/2
+            # import pdb; pdb.set_trace()
+            # self._crop_center_init = means_freeze[cluster_mask[0]].cpu().numpy()
             
-            # self.crop_ids = (relevancy[..., 0] > self.relevancy_thresh.value)
-            
-            #Define all crop viewer elements
-            # self.crop_points = relevancy[..., 0] > self.relevancy_thresh.value
-            # self._crop_center_init = self.means[self.crop_points].mean(dim=0).cpu().numpy()
-            self._crop_center_init = means_freeze[relevancy[..., 0].argmax(dim=0).cpu().numpy()].cpu().numpy()
-            # self.original_means = self.means.data.clone()
-            
-            query = self._crop_center_init / self.viser_scale_ratio
+            # query = self._crop_center_init / self.viser_scale_ratio
 
             # self.viewer_control.viser_server.add_icosphere(
             # "/query",
-            # radius = 4, 
-            # color = (1.0, 0.0, 0.0),
+            # radius = self.best_scales[0].item(), 
+            # color = (1.0, 1.0, 1.0),
             # position=(query[0], query[1], query[2]),
             # )
-            # self.viewer_control.viser_server.add_frame(
-            # "/query",
-            # axes_length = 4, 
-            # axes_radius = 0.025 * 3,
-            # wxyz=(1.0, 0.0, 0.0, 0.0),
-            # position=(query[0], query[1], query[2]),
-            # )
-            self.viewer_control.viser_server.add_icosphere(
-            "/query",
-            radius = self.best_scales[0].item(), 
-            color = (1.0, 1.0, 1.0),
-            position=(query[0], query[1], query[2]),
-            )
 
 
-            H = self.datamanager.train_dataset._dataparser_outputs.dataparser_transform
-            row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=H.device)
+            # H = self.datamanager.train_dataset._dataparser_outputs.dataparser_transform
+            # row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=H.device)
 
-            inv_H = torch.cat([torch.cat([H[:3, :3].transpose(1, 0), -H[:3, 3:]], dim=1), row], dim=0)
-            query_world = inv_H @ torch.tensor([query[0], query[1], query[2], 1],dtype=torch.float32,device=H.device)
-            print("Query Location:", query_world / VISER_NERFSTUDIO_SCALE_RATIO)
-            print("Best Scale:", self.best_scales[0].item())
+            # inv_H = torch.cat([torch.cat([H[:3, :3].transpose(1, 0), -H[:3, 3:]], dim=1), row], dim=0)
+            # query_world = inv_H @ torch.tensor([query[0], query[1], query[2], 1],dtype=torch.float32,device=H.device)
+            # print("Query Location:", query_world / VISER_NERFSTUDIO_SCALE_RATIO)
+            # print("Best Scale:", self.best_scales[0].item())
 
-            self.localized_query = query_world[:3].cpu().numpy() / VISER_NERFSTUDIO_SCALE_RATIO
-            
-            # self._crop_handle = self.viewer_control.viser_server.add_transform_controls("Crop Points", depth_test=False, line_width=4.0)
-            # world_center = tuple(p / self.viser_scale_ratio for p in self._crop_center_init)
-            # self._crop_handle.position = world_center
+            # self.localized_query = query_world[:3].cpu().numpy() / VISER_NERFSTUDIO_SCALE_RATIO
 
-            # self._crop_center.value = tuple(p / self.viser_scale_ratio for p in self._crop_center_init)
-
-            # self.viewer_control.viser_server.add_point_cloud("Centroid", self._crop_center_init / self.viser_scale_ratio, np.array([0,0,0]), 0.1)
-
+            self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
 
     def crop_to_word_cb(self,element):
         with torch.no_grad():
@@ -1234,7 +1275,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
             weights = torch.sigmoid(self.opacities[indicies].view(-1, 4))
             weights = torch.nn.Softmax(dim=-1)(weights)
             points = self.means[indicies]
-            # clip_hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
             clip_hash_encoding = self.gaussian_lerf_field.get_hash(points)
             clip_hash_encoding = clip_hash_encoding.view(-1, 4, clip_hash_encoding.shape[1])
             clip_hash_encoding = (clip_hash_encoding * weights.unsqueeze(-1))
@@ -1242,53 +1282,249 @@ class smsGaussianSplattingModel(SplatfactoModel):
             clip_feats = self.gaussian_lerf_field.get_outputs_from_feature(clip_hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
             relevancy = self.image_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.num_points, -1)
             color = apply_colormap(relevancy[..., 0:1])
-            self.viewer_control.viser_server.add_point_cloud("relevancy", self.means.numpy(force=True) * 10, color.numpy(force=True), 0.01)
+            self.crop_ids = (relevancy[..., 0] / relevancy[..., 0].max() > self.relevancy_thresh.value)
+            # import pdb; pdb.set_trace()
+            self.viewer_control.viser_server.add_point_cloud(
+                "Relevancy", 
+                self.means.numpy(force=True)[self.crop_ids.cpu()] * 10, 
+                color.numpy(force=True)[self.crop_ids.cpu()], 
+                0.01
+                )
 
             # Add a slider to debug the relevancy values
             
             # self.crop_ids = (relevancy[..., 0] > self.relevancy_thresh.value)
             
             #Define all crop viewer elements
-            self.crop_points = relevancy[..., 0] > self.relevancy_thresh.value
-            self._crop_center_init = self.means[self.crop_points].mean(dim=0).cpu().numpy()
+            self._crop_center_init = self.means[self.crop_ids].mean(dim=0).cpu().numpy()
             self.original_means = self.means.data.clone()
 
-            self._crop_handle = self.viewer_control.viser_server.add_transform_controls("Crop Points", depth_test=False, line_width=4.0)
+            self._crop_handle = self.viewer_control.viser_server.add_transform_controls(
+                "Crop Points", 
+                depth_test=False, 
+                line_width=4.0)
             world_center = tuple(p / self.viser_scale_ratio for p in self._crop_center_init)
             self._crop_handle.position = world_center
 
             @self._crop_handle.on_update
             def _update_crop_handle(han):
-                # import pdb; pdb.set_trace()
                 if self._crop_center_init is None:
                     return
-                # import pdb; pdb.set_trace()
                 new_center = np.array(self._crop_handle.position) * self.viser_scale_ratio
                 delta = new_center - self._crop_center_init
                 displacement = torch.zeros_like(self.means)
-                displacement[self.crop_points] = torch.from_numpy(delta).to(self.device).to(self.means.dtype)
+                displacement[self.crop_ids] = torch.from_numpy(delta).to(self.device).to(self.means.dtype)
                 
                 curr_to_world = torch.from_numpy(vtf.SE3(np.concatenate((self._crop_handle.wxyz, self._crop_handle.position * self.viser_scale_ratio))).as_matrix()).to(self.device).to(self.means.dtype)
                 transform = torch.from_numpy(vtf.SE3(np.concatenate((self._crop_handle.wxyz, (self._crop_handle.position * self.viser_scale_ratio) - self._crop_center_init))).as_matrix()).to(self.device).to(self.means.dtype)
 
-                print(f"transform {transform}")
                 transformed_points = self.original_means.clone()
-                homogeneous_points = torch.cat((transformed_points[self.crop_points], torch.ones(transformed_points[self.crop_points].shape[0], 1, device=self.device, dtype=self.means.dtype)), dim=1)
+                homogeneous_points = torch.cat((transformed_points[self.crop_ids], torch.ones(transformed_points[self.crop_ids].shape[0], 1, device=self.device, dtype=self.means.dtype)), dim=1)
                 transformed_homogeneous = curr_to_world @ transform @ torch.inverse(curr_to_world) @ homogeneous_points.transpose(0,1)
                 transformed_homogeneous = transformed_homogeneous.transpose(0,1)
-                transformed_points[self.crop_points] = transformed_homogeneous[:, :3] / transformed_homogeneous[:, 3:4]
+                transformed_points[self.crop_ids] = transformed_homogeneous[:, :3] / transformed_homogeneous[:, 3:4]
                 self.means.data = transformed_points
 
-            # self._crop_center.value = tuple(p / self.viser_scale_ratio for p in self._crop_center_init)
-
-            self.viewer_control.viser_server.add_point_cloud("Centroid", self._crop_center_init / self.viser_scale_ratio, np.array([0,0,0]), 0.1)
+            self.viewer_control.viser_server.add_point_cloud(
+                "Centroid", 
+                np.array([(self._crop_center_init / self.viser_scale_ratio)]), 
+                np.array([0,0,0]), 
+                0.1
+                )
 
     def reset_crop_cb(self, element):
-        self.crop_ids = None#torch.ones_like(self.means[:,0],dtype=torch.bool)
+        self.crop_ids = None
         self.means.data = self.original_means
         self._crop_center_init = None
         self._crop_handle.visible = False
+
+    def _reshuffle_cluster_colors(self, button: ViewerButton):
+        """Reshuffle the cluster colors, if clusters defined using `_cluster_scene`."""
+        if self.cluster_labels is None:
+            return
+        self.cluster_scene_shuffle_colors.set_disabled(True)  # Disable user from reshuffling colors
+        self.colormap = generate_random_colors()
+        colormap = self.colormap
+
+        labels = self.cluster_labels
+
+        features_dc = self.gauss_params['features_dc'].detach()
+        features_rest = self.gauss_params['features_rest'].detach()
+        for c_id in range(0, labels.max().int().item() + 1):
+            # set the colors of the gaussians accordingly using colormap from matplotlib
+            cluster_mask = np.where(labels == c_id)
+            features_dc[cluster_mask] = RGB2SH(colormap[c_id, :3].to(self.gauss_params['features_dc']))
+            features_rest[cluster_mask] = 0
+
+        self.gauss_params['features_dc'] = torch.nn.Parameter(self.gauss_params['features_dc'])
+        self.gauss_params['features_rest'] = torch.nn.Parameter(self.gauss_params['features_rest'])
+        self.cluster_scene_shuffle_colors.set_disabled(False)
+
+    def _cluster_scene(self, button: ViewerButton):
+        """Cluster the scene, and assign gaussian colors based on the clusters.
+        Also populates self.crop_group_list with the clusters group indices."""
+
+        # self._queue_state()  # Save current state
+        self.cluster_scene.set_disabled(True)  # Disable user from clustering, while clustering
+
         
+        # positions = self.gauss_params['means'].detach()
+        positions = self.means.data.clone().detach()
+        distances, indicies = self.k_nearest_sklearn(positions, 3, True)
+        distances = torch.from_numpy(distances).to(self.device)
+        indicies = torch.from_numpy(indicies).view(-1)
+        weights = torch.sigmoid(self.opacities[indicies].view(-1, 4))
+        weights = torch.nn.Softmax(dim=-1)(weights)
+        points = positions[indicies]
+        hash_encoding = self.gaussian_lerf_field.get_hash(points)
+        hash_encoding = hash_encoding.view(-1, 4, hash_encoding.shape[1])
+        hash_encoding = (hash_encoding * weights.unsqueeze(-1))
+        hash_encoding = hash_encoding.sum(dim=1)
+        group_feats = self.gaussian_lerf_field.get_outputs_from_feature(hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).cpu().detach().numpy()
+        positions = positions.cpu().numpy()
+
+        start = time.time()
+
+        # Cluster the gaussians using HDBSCAN.
+        # We will first cluster the downsampled gaussians, then 
+        #  assign the full gaussians to the spatially closest downsampled gaussian.
+
+        vec_o3d = o3d.utility.Vector3dVector(positions)
+        pc_o3d = o3d.geometry.PointCloud(vec_o3d)
+        min_bound = np.clip(pc_o3d.get_min_bound(), -1, 1)
+        max_bound = np.clip(pc_o3d.get_max_bound(), -1, 1)
+        # downsample size to be a percent of the bounding box extent
+        # downsample_size = 0.01 * scale
+        pc, _, ids = pc_o3d.voxel_down_sample_and_trace(
+            0.0001, min_bound, max_bound
+        )
+        if len(ids) > 1e6:
+            print(f"Too many points ({len(ids)}) to cluster... aborting.")
+            print( "Consider using interactive select to reduce points before clustering.")
+            print( "Are you sure you want to cluster? Press y to continue, else return.")
+            # wait for input to continue, if yes then continue, else return
+            if input() != "y":
+                self.cluster_scene.set_disabled(False)
+                return
+
+        id_vec = np.array([points[0] for points in ids])  # indices of gaussians kept after downsampling
+        group_feats_downsampled = group_feats[id_vec]
+        positions_downsampled = np.array(pc.points)
+
+        print(f"Clustering {group_feats_downsampled.shape[0]} gaussians... ", end="", flush=True)
+
+        # Run cuml-based HDBSCAN
+        clusterer = HDBSCAN(
+            cluster_selection_epsilon=0.1,
+            min_samples=30,
+            min_cluster_size=30,
+            allow_single_cluster=True,
+        ).fit(group_feats_downsampled)
+
+        non_clustered = np.ones(positions.shape[0], dtype=bool)
+        non_clustered[id_vec] = False
+        labels = clusterer.labels_.copy()
+        clusterer.labels_ = -np.ones(positions.shape[0], dtype=np.int32)
+        clusterer.labels_[id_vec] = labels
+
+        # Assign the full gaussians to the spatially closest downsampled gaussian, with scipy NearestNeighbors.
+        positions_np = positions[non_clustered]
+        if positions_np.shape[0] > 0:  # i.e., if there were points removed during downsampling
+            k = 1
+            nn_model = NearestNeighbors(
+                n_neighbors=k, algorithm="auto", metric="euclidean"
+            ).fit(positions_downsampled)
+            _, indices = nn_model.kneighbors(positions_np)
+            clusterer.labels_[non_clustered] = labels[indices[:, 0]]
+
+        labels = clusterer.labels_
+        print(f"done. Took {time.time()-start} seconds. Found {labels.max() + 1} clusters.")
+
+        noise_mask = labels == -1
+        if noise_mask.sum() != 0 and (labels>=0).sum() > 0:
+            # if there is noise, but not all of it is noise, relabel the noise
+            valid_mask = labels >=0
+            valid_positions = positions[valid_mask]
+            k = 1
+            nn_model = NearestNeighbors(
+                n_neighbors=k, algorithm="auto", metric="euclidean"
+            ).fit(valid_positions)
+            noise_positions = positions[noise_mask]
+            _, indices = nn_model.kneighbors(noise_positions)
+            # for now just pick the closest cluster
+            noise_relabels = labels[valid_mask][indices[:, 0]]
+            labels[noise_mask] = noise_relabels
+            clusterer.labels_ = labels
+
+        labels = clusterer.labels_
+
+        # colormap = self.colormap
+
+        opacities = self.gauss_params['opacities'].detach()
+        opacities[labels < 0] = -100  # hide unclustered gaussians
+        self.gauss_params['opacities'] = torch.nn.Parameter(opacities.float())
+
+        self.cluster_labels = torch.Tensor(labels)
+        # import pdb; pdb.set_trace()
+        # features_dc = self.gauss_params['features_dc'].detach()
+        # features_rest = self.gauss_params['features_rest'].detach()
+        # for c_id in range(0, labels.max() + 1):
+        #     # set the colors of the gaussians accordingly using colormap from matplotlib
+        #     cluster_mask = np.where(labels == c_id)
+        #     features_dc[cluster_mask] = RGB2SH(colormap[c_id, :3].to(self.gauss_params['features_dc']))
+        #     features_rest[cluster_mask] = 0
+
+        # self.gauss_params['features_dc'] = torch.nn.Parameter(self.gauss_params['features_dc'])
+        # self.gauss_params['features_rest'] = torch.nn.Parameter(self.gauss_params['features_rest'])
+        self.rgb1_cluster0 = not self.rgb1_cluster0
+        self.cluster_scene.set_disabled(False)
+        self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
+
+    def _togglergbcluster(self, button: ViewerButton):
+        self.rgb1_cluster0 = not self.rgb1_cluster0
+        self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
+        
+    def _export_visible_gaussians(self, button: ViewerButton):
+        """Export the visible gaussians to a .ply file"""
+        # location to save
+        output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
+        filename = Path(output_dir) / f"gaussians.ply"
+
+        # Copied from exporter.py
+        map_to_tensors = {}
+
+        with torch.no_grad():
+            positions = self.gauss_params['means'].cpu().numpy()
+            map_to_tensors["positions"] = o3d.core.Tensor(positions, o3d.core.float32)
+            map_to_tensors["normals"] = o3d.core.Tensor(np.zeros_like(positions), o3d.core.float32)
+
+            colors = self.colors.data.cpu().numpy()
+            map_to_tensors["colors"] = (colors * 255).astype(np.uint8)
+            for i in range(colors.shape[1]):
+                map_to_tensors[f"f_dc_{i}"] = colors[:, i : i + 1]
+
+            shs = self.shs_rest.data.cpu().numpy()
+            if self.config.sh_degree > 0:
+                shs = shs.reshape((colors.shape[0], -1, 1))
+                for i in range(shs.shape[-1]):
+                    map_to_tensors[f"f_rest_{i}"] = shs[:, i]
+
+            map_to_tensors["opacity"] = self.gauss_params['opacities'].data.cpu().numpy()
+
+            scales = self.gauss_params['scales'].data.cpu().unsqueeze(-1).numpy()
+            for i in range(3):
+                map_to_tensors[f"scale_{i}"] = scales[:, i]
+
+            quats = self.gauss_params['quats'].data.cpu().unsqueeze(-1).numpy()
+
+            for i in range(4):
+                map_to_tensors[f"rot_{i}"] = quats[:, i]
+
+        pcd = o3d.t.geometry.PointCloud(map_to_tensors)
+
+        o3d.t.io.write_point_cloud(str(filename), pcd)
+
+
     def get_max_across(self, means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None):
         # probably not a good idea bc it's prob going to be a lot of memory
         n_phrases = len(self.image_encoder.positives)
@@ -1300,17 +1536,14 @@ class smsGaussianSplattingModel(SplatfactoModel):
         BLOCK_WIDTH = 16
 
         with torch.no_grad():
-            clip_hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
-            # print(type(clip_hash_encoding))
-            # print(clip_hash_encoding.ndimension())
-            # print(clip_hash_encoding.size(1))
-            # import pdb; pdb.set_trace()
+            hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
+
             field_output, alpha, info = rasterization(
                         means=means_crop,
                         quats=quats_crop / quats_crop.norm(dim=-1, keepdim=True),
                         scales=torch.exp(scales_crop),
                         opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-                        colors=clip_hash_encoding,
+                        colors=hash_encoding,
                         viewmats=viewmat, # [1, 4, 4]
                         Ks=K,  # [1, 3, 3]
                         width=W,

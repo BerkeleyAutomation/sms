@@ -17,10 +17,10 @@ from nerfstudio.pipelines.base_pipeline import (
 import trimesh
 # from nerfstudio.data.scene_box import OrientedBox
 
-from sms.data.sms_datamanager import (
-    smsDataManager,
-    smsDataManagerConfig,
-)
+# from sms.data.sms_datamanager import (
+#     smsDataManager,
+#     smsDataManagerConfig,
+# )
 
 # import viser
 # import viser.transforms as vtf
@@ -45,6 +45,7 @@ from sms.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
 # from gsplat.sh import spherical_harmonics, num_sh_bases
 # from gsplat.cuda_legacy._wrapper import num_sh_bases
 from sms.data.scene_box import SceneBox, OrientedBox
+from sms.data.full_images_datamanager import FullImageDatamanagerConfig
 
 # import sms.query_diff_utils as query_diff_utils
 from sms.sms_utils import Utils as U
@@ -128,12 +129,12 @@ def get_2d_embeds(image: torch.Tensor, scale: float, pipeline):
 
 
 @dataclass
-class smsPipelineConfig(VanillaPipelineConfig):
+class smsdataPipelineConfig(VanillaPipelineConfig):
     """Configuration for pipeline instantiation"""
 
-    _target: Type = field(default_factory=lambda: smsPipeline)
+    _target: Type = field(default_factory=lambda: smsdataPipeline)
     """target class to instantiate"""
-    datamanager: smsDataManagerConfig = smsDataManagerConfig()
+    datamanager: FullImageDatamanagerConfig = FullImageDatamanagerConfig()
     """specifies the datamanager config"""
     model: ModelConfig = smsGaussianSplattingModelConfig()
     """specifies the model config"""
@@ -141,34 +142,33 @@ class smsPipelineConfig(VanillaPipelineConfig):
     network: BaseImageEncoderConfig = BaseImageEncoderConfig()
     """specifies the vision-language network config"""
 
-
-class smsPipeline(VanillaPipeline):
+class smsdataPipeline(VanillaPipeline):
     def __init__(
         self,
-        config: smsPipelineConfig,
+        config: smsdataPipelineConfig,
         device: str,
         test_mode: Literal["test", "val", "inference"] = "val",
         world_size: int = 1,
         local_rank: int = 0,
         grad_scaler: Optional[GradScaler] = None,
-        highres_downscale : float = 4.0,
+        # highres_downscale : float = 4.0,
         use_clip : bool = True,
-        model_name : str = "dino_vits8",
+        # model_name : str = "dino_vits8",
         # dino_thres : float = 0.4, 
-        clip_out_queue : Optional[mp.Queue] = None,
+        # clip_out_queue : Optional[mp.Queue] = None,
     ):
         super(VanillaPipeline, self).__init__()
         self.config = config
         self.test_mode = test_mode
-        self.clip_out_queue = clip_out_queue
+        # self.clip_out_queue = clip_out_queue
         # self.dino_out_queue = dino_out_queue
-        self.datamanager: smsDataManager = config.datamanager.setup(
+        self.datamanager: FullImageDatamanagerConfig = config.datamanager.setup(
             device=device,
             test_mode=test_mode,
             world_size=world_size,
             local_rank=local_rank,
             network=self.config.network,
-            clip_out_queue=self.clip_out_queue,
+            # clip_out_queue=self.clip_out_queue,
             # dino_out_queue=self.dino_out_queue,
         )
         self.datamanager.to(device)

@@ -52,7 +52,10 @@ class DeticDataloader():
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.sam = False
-    def create(self):
+        # image_list: torch.Tensor = None,
+        self.out_list = [],
+    
+    def create(self, image_list = None):
         # Build the detector and download our pretrained weights
         cfg = get_cfg()
         add_centernet_config(cfg)
@@ -73,6 +76,55 @@ class DeticDataloader():
             print('SAM + Detic on device: ', self.device)
             self.sam_predictor = SamPredictor(sam)
         self.text_encoder = build_text_encoder(pretrain=True)
+
+        if image_list is not None:
+            # return NotImplementedError
+            for img in image_list:
+                H, W = img.shape[:2]
+                start_time = time.time()
+                output = self.detic_predictor(img[:, :, ::-1])
+                print("Inference time: ", time.time() - start_time)
+                instances = output["instances"].to('cpu')
+                boxes = instances.pred_boxes.tensor.numpy()
+
+                masks = None
+                components = torch.zeros(H, W)
+                if self.sam:
+                    if len(boxes) > 0:
+                        # Only run SAM if there are bboxes
+                        masks = self.SAM(img, boxes)
+                        for i in range(masks.shape[0]):
+                            if torch.sum(masks[i][0]) <= H*W/3.5:
+                                components[masks[i][0]] = i + 1
+                else:
+                    masks = output['instances'].pred_masks.unsqueeze(1)
+                    for i in range(masks.shape[0]):
+                        if torch.sum(masks[i][0]) <= H*W/3.5:
+                            components[masks[i][0]] = i + 1
+                bg_mask = (components == 0).to(self.device)
+
+                # Filter out small masks
+                filtered_idx = []
+                for i in range(len(masks)):
+                    if masks[i].sum(dim=(1,2)) <= H*W/3.5:
+                        filtered_idx.append(i)
+                filtered_masks = torch.cat([masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0)
+
+                outputs = {
+                    # "vis": out,
+                    "boxes": boxes,
+                    "masks": masks,
+                    "masks_filtered": filtered_masks,
+                    # "class_idx": class_idx,
+                    # "class_name": class_name,
+                    # "clip_embeds": clip_embeds,
+                    "components": components,
+                    "scores" : output["instances"].scores,
+                }
+                self.out_list.append(outputs)
+    
+    def __call__(self, img_idx):
+        return NotImplementedError
 
     def default_vocab(self):
         # detic_predictor = self.detic_predictor
