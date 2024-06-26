@@ -234,15 +234,15 @@ class smsGaussianSplattingModel(SplatfactoModel):
     def __init__(
         self,
         *args,
-        seed_points: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         **kwargs,
     ):
-        self.seed_points = seed_points
+        if "seed_points" in kwargs:
+            self.seed_pts = kwargs["seed_points"]
+        else:
+            self.seed_pts = None
         super().__init__(*args, **kwargs)
         self.deprojected_new = []
         self.colors_new = []
-        # self.components_new = []
-        # self.max_comp = 0
         self.postBA = False
         self.loaded_ckpt = False
         self.localized_query = None
@@ -974,7 +974,9 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     if 'image_downscale_factor' in self.datamanager.train_dataset._dataparser_outputs.metadata.keys():
                         rgb_downscale = self.datamanager.train_dataset._dataparser_outputs.metadata['image_downscale_factor']
                         downscale_factor = camera.metadata["clip_downscale_factor"] / rgb_downscale
-                        camera.rescale_output_resolution(1 / downscale_factor)
+                    else:
+                        downscale_factor = camera.metadata["clip_downscale_factor"]
+                    camera.rescale_output_resolution(1 / downscale_factor)
 
                     clip_W, clip_H = camera.width.item(), camera.height.item()
                     # print(f"clip_W {clip_W} clip_H {clip_H}")
@@ -1005,10 +1007,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     )
 
                     # rescale the camera back to original dimensions
-                    if 'image_downscale_factor' in self.datamanager.train_dataset._dataparser_outputs.metadata.keys():
-                        camera.rescale_output_resolution(downscale_factor)
+                    camera.rescale_output_resolution(downscale_factor)
                     
-
                     self.random_pixels = self.datamanager.random_pixels.to(self.device)
 
                     clip_scale = self.datamanager.curr_scale * torch.ones((self.random_pixels.shape[0],1),device=self.device)
@@ -1131,19 +1131,20 @@ class smsGaussianSplattingModel(SplatfactoModel):
             )
             loss_dict["clip_loss"] = unreduced_clip.sum(dim=-1).nanmean()
 
-            mask = batch["instance_masks"]
-            if len(mask) > 2:
-                instance_loss = torch.tensor(0.0, device=self.device)
+            if self.training and 'instance' in outputs and 'instance_masks' in batch: 
+                mask = batch["instance_masks"]
+                if len(mask) > 2:
+                    instance_loss = torch.tensor(0.0, device=self.device)
 
-                idx = torch.randperm(len(mask))
+                    idx = torch.randperm(len(mask))
 
-                for i in range(len(mask)-1):
-                    instance_loss += (
-                        F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
-                loss = instance_loss / (1.6*len(mask)-1)
+                    for i in range(len(mask)-1):
+                        instance_loss += (
+                            F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
+                    loss = instance_loss / (1.6*len(mask)-1)
 
-                assert not torch.isnan(loss)
-                loss_dict["instance_loss"] = loss
+                    assert not torch.isnan(loss)
+                    loss_dict["instance_loss"] = loss
 
         if self.training:
             # Add loss from camera optimizer

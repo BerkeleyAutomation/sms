@@ -70,7 +70,7 @@ class PatchEmbeddingDataloader(FeatureDataloader):
         ).to(self.device)
 
         img_embeds = []
-        for img in tqdm(image_list, desc="Embedding images", leave=False):
+        for img in tqdm(image_list, desc="CLIP Embedding Images", leave=False):
             img_embeds.append(self._embed_clip_tiles(img.unsqueeze(0), unfold_func))
         self.data = torch.from_numpy(np.stack(img_embeds)).half().to(self.device)
 

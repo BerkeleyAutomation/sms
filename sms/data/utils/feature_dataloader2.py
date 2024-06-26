@@ -51,6 +51,8 @@ class FeatureDataloader(ABC):
     def try_load(self, img_list: torch.Tensor):
         try:
             self.load()
+            # print("Loaded")
         except (FileNotFoundError, ValueError):
+            # print("Not found")
             self.create(img_list)
             self.save()

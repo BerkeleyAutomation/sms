@@ -109,6 +109,7 @@ sms_data_method = MethodSpecification(
         gradient_accumulation_steps = {'camera_opt': 100,'color':10,'shs':10},
         pipeline=smsdataPipelineConfig(
             datamanager=FullImageDatamanagerConfig(
+                dataparser=NerfstudioDataParserConfig(load_3D_points=True),
                 network=OpenCLIPNetworkConfig(
                     clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512, device='cuda:0'
                 ),
@@ -122,9 +123,9 @@ sms_data_method = MethodSpecification(
             ),
             model=smsGaussianSplattingModelConfig(),
 
-            network=OpenCLIPNetworkConfig(
-                    clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512, device='cuda:0'
-                ),
+            # network=OpenCLIPNetworkConfig(
+            #         clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512, device='cuda:0'
+            #     ),
             
             # depthmodel=ZoeDepthNetworkConfig(device='cuda:0'),
         ),

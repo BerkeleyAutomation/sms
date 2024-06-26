@@ -49,7 +49,7 @@ from nerfstudio.utils.rich_utils import CONSOLE
 
 # from nerfstudio.data.utils.dino_dataloader import DinoDataloader
 from sms.data.utils.pyramid_embedding_dataloader2 import PyramidEmbeddingDataloader
-from sms.data.utils.detic_dataloader import DeticDataloader
+from sms.data.utils.detic_dataloader2 import DeticDataloader
 from sms.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
 
 @dataclass
@@ -79,6 +79,8 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """specifies the vision-language network config"""
     clip_downscale_factor: int = 4
     """The downscale factor for the clip pyramid"""
+    num_random_masks: int = 20
+    """Number of random masks to sample for contrastive loss"""
 
 
 class FullImageDatamanager(DataManager, Generic[TDataset]):
@@ -143,7 +145,8 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         images = torch.cat(images)
         cache_dir = f"outputs/{self.config.dataparser.data.name}"
         clip_cache_path = Path(osp.join(cache_dir, f"clip_{self.image_encoder.name}"))
-        dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
+        detic_cache_path = Path(osp.join(cache_dir, "detic.npy"))
+        # dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
         # NOTE: cache config is sensitive to list vs. tuple, because it checks for dict equality
         # self.dino_dataloader = DinoDataloader(
         #     image_list=images,
@@ -167,9 +170,20 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             model=self.image_encoder,
         )
 
-        self.detic = DeticDataloader()
-        self.detic.create()
-        self.detic.default_vocab()
+        self.detic = DeticDataloader(
+            image_list=images,
+            device=device,
+            cfg={
+                "sam": False,
+                # "tile_size_res": self.config.patch_tile_size_res,
+                # "stride_scaler": self.config.patch_stride_scaler,
+                # "image_shape": list(images.shape[2:4]),
+                # "model_name": self.image_encoder.name,
+            },
+            cache_path=detic_cache_path,
+        )
+        # self.detic.create()
+        # self.detic.default_vocab()
 
         self.curr_scale = None
         self.random_pixels = None
@@ -403,10 +417,19 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             camera.metadata = {}
         camera.metadata["cam_idx"] = image_idx
 
-        detic_out = data["detic"]
+
+        #Pick a random scale from min to max and then the clip features at that scale
+        H, W = data["image"].shape[:2]
+        scale = torch.rand(1).to(self.device)*(self.config.patch_tile_size_range[1]-self.config.patch_tile_size_range[0])+self.config.patch_tile_size_range[0]
+        # scale = torch.tensor(0.1).to(self.device)
+        self.curr_scale = scale
+        scaled_height = H//self.config.clip_downscale_factor
+        scaled_width = W//self.config.clip_downscale_factor
+
+        detic_masks = torch.from_numpy(self.detic.data[image_idx])
 
         with torch.no_grad():
-            detic_masks = detic_out["masks_filtered"]
+            # detic_masks = detic_out["masks_filtered"]
             perm = torch.randperm(len(detic_masks))
             assert len(detic_masks) > 0, "No masks found"
 
@@ -416,14 +439,7 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
 
             masks = F.interpolate(masks.unsqueeze(1).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(num_samp, -1)
             data["instance_masks"] = masks.squeeze(1)
-
-        #Pick a random scale from min to max and then the clip features at that scale
-        H, W = data["image"].shape[:2]
-        scale = torch.rand(1).to(self.device)*(self.config.patch_tile_size_range[1]-self.config.patch_tile_size_range[0])+self.config.patch_tile_size_range[0]
-        # scale = torch.tensor(0.1).to(self.device)
-        self.curr_scale = scale
-        scaled_height = H//self.config.clip_downscale_factor
-        scaled_width = W//self.config.clip_downscale_factor
+            
         self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
 
         x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)

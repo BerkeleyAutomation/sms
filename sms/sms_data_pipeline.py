@@ -166,23 +166,29 @@ class smsdataPipeline(VanillaPipeline):
             device=device,
             test_mode=test_mode,
             world_size=world_size,
-            local_rank=local_rank,
-            network=self.config.network,
-            # clip_out_queue=self.clip_out_queue,
-            # dino_out_queue=self.dino_out_queue,
+            local_rank=local_rank
         )
+        seed_pts = None
+        if (
+            hasattr(self.datamanager, "train_dataparser_outputs")
+            and "points3D_xyz" in self.datamanager.train_dataparser_outputs.metadata
+        ):
+            pts = self.datamanager.train_dataparser_outputs.metadata["points3D_xyz"]
+            pts_rgb = self.datamanager.train_dataparser_outputs.metadata["points3D_rgb"]
+            seed_pts = (pts, pts_rgb)
         self.datamanager.to(device)
-        self.image_encoder: BaseImageEncoder = config.network.setup()
+        # self.image_encoder: BaseImageEncoder = config.network.setup()
         # TODO(ethan): get rid of scene_bounds from the model
-        assert self.datamanager.train_dataset is not None, "Missing input dataset"
 
+        assert self.datamanager.train_dataset is not None, "Missing input dataset"
         self._model = config.model.setup(
             scene_box=self.datamanager.train_dataset.scene_box,
             num_train_data=len(self.datamanager.train_dataset),
             metadata=self.datamanager.train_dataset.metadata,
-            image_encoder=self.image_encoder,
             grad_scaler=grad_scaler,
+            image_encoder=self.datamanager.image_encoder,
             datamanager=self.datamanager,
+            seed_points=seed_pts,
         )
         self.model.to(device)
 
@@ -193,7 +199,7 @@ class smsdataPipeline(VanillaPipeline):
             self._model = typing.cast(Model, DDP(self._model, device_ids=[local_rank], find_unused_parameters=True))
             dist.barrier(device_ids=[local_rank])
 
-        self.use_clip = use_clip 
+        self.use_clip = use_clip
         self.plot_verbose = True
         
         self.img_count = 0
