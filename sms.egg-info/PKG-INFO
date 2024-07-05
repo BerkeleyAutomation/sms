@@ -5,3 +5,8 @@ Requires-Python: >=3.8
 Requires-Dist: Pillow
 Requires-Dist: open-clip-torch
 Requires-Dist: numpy
+Requires-Dist: open3d
+Requires-Dist: autolab_core
+Requires-Dist: torch
+Requires-Dist: torchvision
+Requires-Dist: nerfstudio

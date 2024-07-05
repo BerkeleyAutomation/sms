@@ -4,11 +4,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from sms.data.utils.feature_dataloader2 import FeatureDataloader
-from sms.data.utils.patch_embedding_dataloader2 import PatchEmbeddingDataloader
+from sms.data.utils.feature_dataloader import FeatureDataloader
+from sms.data.utils.patch_embedding_old_dataloader import PatchEmbeddingDataloader
 from sms.encoders.image_encoder import BaseImageEncoder
 from tqdm import tqdm
-
+import time
 
 class PyramidEmbeddingDataloader(FeatureDataloader):
     def __init__(
@@ -78,6 +78,47 @@ class PyramidEmbeddingDataloader(FeatureDataloader):
             )
             print(image_list.shape)
 
+    def generate_clip_interp(self, image):
+        # import pdb; pdb.set_trace()
+        C, H, W = image.shape
+        for i, tr in enumerate(tqdm(self.tile_sizes, desc="Scales")):
+            stride_scaler = self.strider_scaler_list[i]
+            self.data_dict[i] = PatchEmbeddingDataloader(
+                cfg={
+                    "tile_ratio": tr.item(),
+                    "stride_ratio": stride_scaler,
+                    "image_shape": [H,W],
+                    "model_name": self.cfg["model_name"],
+                },
+                device=self.device,
+                model=self.model,
+                # image_list=image_list,
+                # cache_path=Path(f"{self.cache_path}/level_{i}.npy"),
+            )
+            self.data_dict[i].create(None)
+        img_batch = image.unsqueeze(0)
+        start = time.time()
+
+        clip_interp = []
+        for i, tr in enumerate(tqdm(self.tile_sizes, desc="Scales")):
+            clip_interpolations = self.data_dict[i].add_images(img_batch)
+            # self.data_dict[i].data[0,...] = clip_interpolations
+            clip_interp.append(clip_interpolations)
+        
+        assert len(self.data_dict) != 0
+
+        
+        # for _ in img_batch:
+            
+        # for i, tr in enumerate(self.tile_sizes):
+        #     clip_interp.append(self.data_dict[i].data[0,...])
+
+            # self.out_queue.put(updates)
+        #     j+=1
+        
+        print(f"PyramidEmbeddingProcess took {time.time()-start} seconds")
+        return clip_interp
+    
     def save(self):
         cache_info_path = self.cache_path.with_suffix(".info")
         with open(cache_info_path, "w") as f:

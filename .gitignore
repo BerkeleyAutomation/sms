@@ -11,3 +11,15 @@
 *.pth
 
 __pycache__/
+
+sms/data/utils/Detic/detic_masks
+
+sms/configs/__pycache__/*
+
+sms/data/utils/__pycache__/*
+
+sms/encoders/__pycache__/*
+
+outputs
+
+stapler_cup_apple_2_scissors
