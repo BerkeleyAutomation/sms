@@ -11,7 +11,7 @@ dependencies=[
     "autolab_core",
     "torch",
     "torchvision",
-    "nerfstudio"
+    "nerfstudio",
 ]
 [tool.setuptools]
 include-package-data = true

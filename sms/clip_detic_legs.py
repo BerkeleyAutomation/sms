@@ -20,7 +20,7 @@ from torchvision import transforms
 from matplotlib import pyplot as plt
 from typing import Tuple
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 class RGBDClipImagePose():
     def __init__(self,rgb_image,depth_image,pose,intrinsics,width,height):
