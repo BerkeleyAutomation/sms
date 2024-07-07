@@ -2,8 +2,8 @@
 
 ## Installation
 ```
-conda create --name sms_env7 -y python=3.10.14
-conda activate sms_env7
+conda create --name sms_env -y python=3.10.14
+conda activate sms_env
 pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
 pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
 cd ~/
@@ -16,7 +16,7 @@ cd L3gs/legs_ws
 colcon build --packages-select lifelong_msgs
 conda activate l3gs_env2
 . install/setup.bash
-cd L3GS/l3gs/
+cd ~/sms/L3GS/l3gs/
 python -m pip install -e .
 ns-install-cli
 conda activate sms_env7
