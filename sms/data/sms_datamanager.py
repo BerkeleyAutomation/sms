@@ -152,7 +152,7 @@ class smsDataManager(DataManager, Generic[TDataset]):
 
         super().__init__()
         self.use_clip = False
-        self.lerf_step = 0
+        self.lerf_step = 5000
         self.clip_out_queue = clip_out_queue
 
 

@@ -955,7 +955,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         outputs["background"] = background
 
         if self.datamanager.use_clip or self.loaded_ckpt:
-            if (self.step - self.datamanager.lerf_step > 500) or self.loaded_ckpt:
+            if (self.step - self.datamanager.lerf_step > 500):
                 if camera.metadata is not None:
                     if "clip_downscale_factor" not in camera.metadata:
                         return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background}
@@ -1139,12 +1139,19 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     idx = torch.randperm(len(mask))
 
                     for i in range(len(mask)-1):
+                        # print("size of mask 1: ", mask[idx[i]].sum())
+                        # print("size of mask 2: ", mask[idx[i+1]].sum())
+                        if mask[idx[i]].sum() <= 50 or mask[idx[i+1]].sum() <= 50:
+                            continue
                         instance_loss += (
                             F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
-                    loss = instance_loss / (1.6*len(mask)-1)
-
-                    assert not torch.isnan(loss)
-                    loss_dict["instance_loss"] = loss
+                    loss = instance_loss / (len(mask)-1)
+                    # print(f"instance loss: {loss}")
+                    if loss != 0:
+                        # print(f"instance loss: {loss}")
+                        loss_dict["instance_loss"] = loss
+                    # else:
+                    #     import pdb; pdb.set_trace()
 
         if self.training:
             # Add loss from camera optimizer

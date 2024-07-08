@@ -79,7 +79,7 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """specifies the vision-language network config"""
     clip_downscale_factor: int = 4
     """The downscale factor for the clip pyramid"""
-    num_random_masks: int = 20
+    num_random_masks: int = 15
     """Number of random masks to sample for contrastive loss"""
 
 
@@ -188,7 +188,7 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         self.curr_scale = None
         self.random_pixels = None
         self.use_clip = True
-        self.lerf_step = 0
+        self.lerf_step = 5000
 
     def cache_images(self, cache_images_option):
         cached_train = []
