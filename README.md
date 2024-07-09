@@ -21,6 +21,10 @@ python -m pip install -e .
 ns-install-cli
 python -m pip install 'git+https://github.com/facebookresearch/detectron2.git' # From https://detectron2.readthedocs.io/en/latest/tutorials/install.html
 
+```
+
+## Detic
+```
 # From https://github.com/facebookresearch/Detic/blob/main/docs/INSTALL.md
 cd ~/sms/sms/data/utils/Detic
 pip install -r requirements.txt
@@ -30,6 +34,7 @@ cd ~/sms
 python -m pip install -e .
 ```
 
+## RapidsAI CUML
 cuml and cudf install for HDBSCAN on cuda-11.8 and python 3.10:
 
 ```
@@ -44,14 +49,14 @@ import pyarrow
 print(pyarrow.__version__)
 print(pyarrow.__file__) # Make sure this comes from conda env
 ```
-Install detectron2
+<!-- Install detectron2
 ```
 python -m pip install --user 'git+https://github.com/facebookresearch/detectron2.git'
-```
-Install clip
+``` -->
+<!-- Install clip
 ```
  pip install git+https://github.com/openai/CLIP.git
-```
+``` -->
 
 Specific commit of gsplat is required
 ```
