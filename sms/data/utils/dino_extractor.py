@@ -41,11 +41,14 @@ class ViTExtractor:
             self.model = model
         else:
             self.model = ViTExtractor.create_model(model_type)
+
         self.model = ViTExtractor.patch_vit_resolution(self.model, stride=stride)
         self.model.eval()
         self.model.to(self.device)
-        self.p = self.model.patch_embed.patch_size[0] if type(self.model.patch_embed.patch_size) == tuple else \
-            self.model.patch_embed.patch_size
+        if isinstance(self.model.patch_embed.patch_size,tuple):
+            self.p = self.model.patch_embed.patch_size[0]
+        else:
+            self.p = self.model.patch_embed.patch_size
         self.stride = self.model.patch_embed.proj.stride
 
         self.mean = (0.485, 0.456, 0.406) if "dino" in self.model_type else (0.5, 0.5, 0.5)
@@ -127,10 +130,10 @@ class ViTExtractor:
         :param stride: the new stride parameter.
         :return: the adjusted model
         """
-        patch_size = model.patch_embed.patch_size
-        if type(patch_size) is tuple:
-            patch_size = patch_size[0]
-
+        if isinstance(model.patch_embed.patch_size,tuple):
+            patch_size = model.patch_embed.patch_size[0]
+        else:
+            patch_size = model.patch_embed.patch_size
         if stride == patch_size:  # nothing to do
             return model
 

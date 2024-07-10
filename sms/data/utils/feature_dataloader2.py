@@ -33,6 +33,9 @@ class FeatureDataloader(ABC):
 
     def load(self):
         cache_info_path = self.cache_path.with_suffix(".info")
+        print(cache_info_path)
+        import os
+        print(os.getcwd())
         if not cache_info_path.exists():
             raise FileNotFoundError
         with open(cache_info_path, "r") as f:

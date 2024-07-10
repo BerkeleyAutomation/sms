@@ -47,7 +47,7 @@ from nerfstudio.data.datasets.base_dataset import InputDataset
 from nerfstudio.utils.misc import get_orig_class
 from nerfstudio.utils.rich_utils import CONSOLE
 
-# from nerfstudio.data.utils.dino_dataloader import DinoDataloader
+from sms.data.utils.dino_dataloader2 import DinoDataloader
 from sms.data.utils.pyramid_embedding_dataloader2 import PyramidEmbeddingDataloader
 from sms.data.utils.detic_dataloader2 import DeticDataloader
 from sms.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
@@ -81,6 +81,8 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """The downscale factor for the clip pyramid"""
     num_random_masks: int = 15
     """Number of random masks to sample for contrastive loss"""
+    use_denoiser: bool = False
+    """Whether to use the denoiser for the dino encoder"""
 
 
 class FullImageDatamanager(DataManager, Generic[TDataset]):
@@ -146,14 +148,18 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         cache_dir = f"outputs/{self.config.dataparser.data.name}"
         clip_cache_path = Path(osp.join(cache_dir, f"clip_{self.image_encoder.name}"))
         detic_cache_path = Path(osp.join(cache_dir, "detic.npy"))
-        # dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
+        if self.config.use_denoiser:
+            dino_cache_path = Path(osp.join(cache_dir, "denoised_dino.npy"))
+        else:
+            dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
         # NOTE: cache config is sensitive to list vs. tuple, because it checks for dict equality
-        # self.dino_dataloader = DinoDataloader(
-        #     image_list=images,
-        #     device=self.device,
-        #     cfg={"image_shape": list(images.shape[2:4])},
-        #     cache_path=dino_cache_path,
-        # )
+        self.dino_dataloader = DinoDataloader(
+            image_list = images,
+            device = self.device,
+            cfg={"image_shape": list(images.shape[2:4])},
+            cache_path=dino_cache_path,
+            use_denoiser=self.config.use_denoiser,
+        )
         torch.cuda.empty_cache()
         # import pdb; pdb.set_trace()
         self.clip_interpolator = PyramidEmbeddingDataloader(
@@ -188,7 +194,7 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         self.curr_scale = None
         self.random_pixels = None
         self.use_clip = True
-        self.lerf_step = 5000
+        self.lerf_step = 3000
 
     def cache_images(self, cache_images_option):
         cached_train = []
@@ -430,16 +436,19 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
 
         with torch.no_grad():
             # detic_masks = detic_out["masks_filtered"]
-            perm = torch.randperm(len(detic_masks))
+            perm = torch.randperm(len(detic_masks)-1)
             assert len(detic_masks) > 0, "No masks found"
 
-            num_samp = min(len(detic_masks), self.config.num_random_masks)
+            num_samp = min(len(detic_masks)-1, self.config.num_random_masks)
             idx = perm[:num_samp]
             masks = detic_masks[idx].squeeze(1)
 
             masks = F.interpolate(masks.unsqueeze(1).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(num_samp, -1)
             data["instance_masks"] = masks.squeeze(1)
-            
+        
+        # Masks out the background from RGB training, which is always the last detic_mask for the image
+        data["mask"] = ~detic_masks[-1].squeeze(0).unsqueeze(-1)
+        
         self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
 
         x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
@@ -450,6 +459,7 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         with torch.no_grad():
             data["clip"], data["clip_scale"] = self.clip_interpolator(positions, scale)[0], self.clip_interpolator(positions, scale)[1]
             # data["dino"] = self.dino_dataloader(positions)
+            data["dino"] = self.dino_dataloader.get_full_img_feats(camera.metadata["cam_idx"])
         
         camera.metadata["clip_downscale_factor"] = self.config.clip_downscale_factor
         return camera, data

@@ -164,15 +164,15 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """at the beginning, resolution is 1/2^d, where d is this number"""
     cull_alpha_thresh: float = 0.1
     """threshold of opacity for culling gaussians. One can set it to a lower value (e.g. 0.005) for higher quality."""
-    cull_scale_thresh: float = 0.6
+    cull_scale_thresh: float = 0.5
     """threshold of scale for culling huge gaussians"""
-    cull_screen_size: float = 0.2
+    cull_screen_size: float = 0.15
     """if a gaussian is more than this percent of screen space, cull it"""
     continue_cull_post_densification: bool = True
     """If True, continue to cull gaussians post refinement"""
     reset_alpha_every: int = 60
     """Every this many refinement steps, reset the alpha"""
-    densify_grad_thresh: float = 0.001
+    densify_grad_thresh: float = 0.0008
     """threshold of positional gradient norm for densifying gaussians"""
     densify_size_thresh: float = 0.01
     """below this size, gaussians are *duplicated*, otherwise split"""
@@ -180,7 +180,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """number of samples to split gaussians into"""
     sh_degree_interval: int = 1000
     """every n intervals turn on another sh degree"""
-    split_screen_size: float = 0.09
+    split_screen_size: float = 0.05
     """if a gaussian is more than this percent of screen space, split it"""
     stop_screen_size_at: int = 4000
     """stop culling/splitting at this step WRT screen size of gaussians"""
@@ -194,7 +194,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """Initial opacity of deprojected gaussians"""
     ssim_lambda: float = 0.2
     """weight of ssim loss"""
-    stop_split_at: int = 50000
+    stop_split_at: int = 15000
     """stop splitting at this step"""
     sh_degree: int = 3
     """maximum degree of spherical harmonics to use"""
@@ -202,7 +202,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """weight of clip loss"""
     use_scale_regularization: bool = True
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
-    max_gauss_ratio: float = 10.0
+    max_gauss_ratio: float = 5.0
     """threshold of ratio of gaussian max to min scale before applying regularization
     loss from the PhysGaussian paper
     """
@@ -1026,13 +1026,14 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
                 if not self.training:
                     # N x B x 1; N
-                    max_across, self.best_scales, instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
-                    
+                    max_across, self.best_scales = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
+                    #, instances_out
+
                     # assert not torch.isnan(instances_out).any()
-                    if not torch.isnan(instances_out).any():
-                        outputs["group_feats"] = instances_out
-                    else:
-                        print("instance loss may be nan")
+                    # if not torch.isnan(instances_out).any():
+                    #     outputs["group_feats"] = instances_out
+                    # else:
+                    #     print("instance loss may be nan")
 
                     for i in range(len(self.image_encoder.positives)):
                         # import pdb; pdb.set_trace()
@@ -1091,38 +1092,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             batch: ground truth batch corresponding to outputs
             metrics_dict: dictionary of metrics, some of which we can use for loss
         """
-        gt_img = self.composite_with_background(self.get_gt_img(batch["image"]), outputs["background"])
-        pred_img = outputs["rgb"]
-
-        # Set masked part of both ground-truth and rendered image to black.
-        # This is a little bit sketchy for the SSIM loss.
-        if "mask" in batch:
-            # batch["mask"] : [H, W, 1]
-            mask = self._downscale_if_required(batch["mask"])
-            mask = mask.to(self.device)
-            assert mask.shape[:2] == gt_img.shape[:2] == pred_img.shape[:2]
-            gt_img = gt_img * mask
-            pred_img = pred_img * mask
-
-        Ll1 = torch.abs(gt_img - pred_img).mean()
-        simloss = 1 - self.ssim(gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...])
-        if self.config.use_scale_regularization and self.step % 10 == 0:
-            scale_exp = torch.exp(self.scales)
-            scale_reg = (
-                torch.maximum(
-                    scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1),
-                    torch.tensor(self.config.max_gauss_ratio),
-                )
-                - self.config.max_gauss_ratio
-            )
-            scale_reg = 0.1 * scale_reg.mean()
-        else:
-            scale_reg = torch.tensor(0.0).to(self.device)
-
-        loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
-            "scale_reg": scale_reg,
-        }
+        loss_dict = super().get_loss_dict(outputs, batch, metrics_dict)
 
         margin = 1.0
         if self.training and 'clip' in outputs and 'clip' in batch: 
@@ -1153,9 +1123,19 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     # else:
                     #     import pdb; pdb.set_trace()
 
-        if self.training:
-            # Add loss from camera optimizer
-            self.camera_optimizer.get_loss_dict(loss_dict)
+        if outputs['dino'] is not None:
+            gt = batch['dino']
+            gt = resize(gt.permute(2,0,1), (outputs['dino'].shape[0], outputs['dino'].shape[1])).permute(1,2,0)
+            loss_dict['dino_loss'] = torch.nn.functional.mse_loss(outputs['dino'],gt)
+            if not hasattr(self,'nearest_ids') or self.num_points != self.nearest_ids.shape[0]:
+                from cuml.neighbors import NearestNeighbors
+                model = NearestNeighbors(n_neighbors=3)
+                means = self.means.detach().cpu().numpy()
+                model.fit(means)
+                _, self.nearest_ids = model.kneighbors(means)
+            # encourage the nearest neighbors to have similar dino feats
+            if self.step>1000:
+                loss_dict['dino_nn_loss'] = .01*self.gauss_params['dino_feats'][self.nearest_ids].var(dim=1).sum()
 
         return loss_dict
 
@@ -1571,7 +1551,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         for i, scale in enumerate(scales_list):
             with torch.no_grad():
                 out = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device)) #[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
-                instances_output_im = out[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
+                # instances_output_im = out[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
                 clip_output_im = out[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
 
             for j in range(n_phrases):
@@ -1585,4 +1565,4 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         n_phrases_sims[j] = pos_prob
         # print(f"Best scales: {n_phrases_maxs}")#, Words: {self.image_encoder.positives}, Scale List: {scales_list}, All probs: {all_probs}")
         # import pdb; pdb.set_trace()
-        return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs), instances_output_im#, relevancy_rasterized
+        return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs) #, instances_output_im#, relevancy_rasterized

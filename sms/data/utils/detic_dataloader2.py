@@ -121,13 +121,21 @@ class DeticDataloader(FeatureDataloader):
                         if torch.sum(masks[i][0]) <= H*W/3.5:
                             components[masks[i][0]] = i + 1
                 bg_mask = (components == 0).to(self.device)
-
+                
+                # Erode all masks using 3x3 kernel
+                eroded_masks = torch.conv2d(
+                (~masks).float().cuda(),
+                torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
+                    padding=1,
+                )
+                eroded_masks = ~(eroded_masks >= 2) #.squeeze(1)
+                # import pdb; pdb.set_trace()
                 # Filter out small masks
                 filtered_idx = []
                 for i in range(len(masks)):
                     if masks[i].sum(dim=(1,2)) <= H*W/3.5:
                         filtered_idx.append(i)
-                filtered_masks = torch.cat([masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0).cpu().numpy()
+                filtered_masks = torch.cat([eroded_masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0).cpu().numpy()
 
                 outputs = {
                     # "vis": out,
