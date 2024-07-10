@@ -145,6 +145,9 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
 
         images = [self.cached_train[i]["image"].permute(2, 0, 1)[None, ...] for i in range(len(self.cached_train))]
         images = torch.cat(images)
+        if images.shape[1] == 4:
+            images = images[:, :3, ...]
+        assert images.shape[1] == 3, "Images must have 3 channels"
         cache_dir = f"outputs/{self.config.dataparser.data.name}"
         clip_cache_path = Path(osp.join(cache_dir, f"clip_{self.image_encoder.name}"))
         detic_cache_path = Path(osp.join(cache_dir, "detic.npy"))

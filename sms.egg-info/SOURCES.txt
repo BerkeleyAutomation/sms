@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 sms/sms_config.py
+sms/sms_data_pipeline.py
 sms/sms_pipeline.py
 sms/sms_trainer.py
 sms/sms_utils.py
@@ -20,9 +21,11 @@ sms/data/sms_datamanager.py
 sms/data/sms_dataparser.py
 sms/data/sms_dataset.py
 sms/data/utils/detic_dataloader.py
+sms/data/utils/detic_dataloader2.py
 sms/data/utils/dino_dataloader2.py
 sms/data/utils/dino_extractor.py
 sms/data/utils/feature_dataloader.py
+sms/data/utils/feature_dataloader2.py
 sms/data/utils/patch_embedding_dataloader.py
 sms/data/utils/patch_embedding_dataloader2.py
 sms/data/utils/pyramid_embedding_dataloader.py
@@ -158,9 +161,17 @@ sms/encoders/openclip_encoder.py
 sms/field_components/gaussian_lerf_fieldheadnames.py
 sms/fields/gaussian_lerf_field.py
 sms/model/sms_gaussian_splatting.py
+sms/scripts/clip_detic_legs.py
 sms/scripts/dataloader_pytorch.py
 sms/scripts/test_clip_interp.py
 sms/scripts/test_eval.py
 sms/scripts/test_knn.py
+sms/scripts/zedmini/opencv_capture.py
+sms/scripts/zedmini/zed_capture.py
+sms/tracking/atap_loss.py
+sms/tracking/frame.py
+sms/tracking/rigid_group_optimizer.py
+sms/tracking/utils.py
+sms/tracking/utils2.py
 sms/utils/colormaps.py
 sms/utils/colors.py

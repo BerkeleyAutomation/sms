@@ -15,5 +15,5 @@ include-package-data = true
 include = ["sms*"]
 
 [project.entry-points.'nerfstudio.method_configs']
-sms = 'sms.sms_config:sms_method'
+# sms = 'sms.sms_config:sms_method'
 sms-data = 'sms.sms_config:sms_data_method'

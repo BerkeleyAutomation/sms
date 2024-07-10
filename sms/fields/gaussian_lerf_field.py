@@ -142,17 +142,17 @@ class GaussianLERFField(Field):
             },
         )
 
-        self.dino_net = tcnn.Network(
-            n_input_dims=tot_out_dims,
-            n_output_dims=384,
-            network_config={
-                "otype": "CutlassMLP",
-                "activation": "ReLU",
-                "output_activation": "None",
-                "n_neurons": 256,
-                "n_hidden_layers": 1,
-            },
-        )
+        # self.dino_net = tcnn.Network(
+        #     n_input_dims=tot_out_dims,
+        #     n_output_dims=384,
+        #     network_config={
+        #         "otype": "CutlassMLP",
+        #         "activation": "ReLU",
+        #         "output_activation": "None",
+        #         "n_neurons": 256,
+        #         "n_hidden_layers": 1,
+        #     },
+        # )
 
     @staticmethod
     def _get_encoding(start_res, end_res, levels, indim=3, hash_size=19, features_per_level=8):
@@ -191,8 +191,8 @@ class GaussianLERFField(Field):
         instance_pass = self.instance_net(x).view(positions.shape[0], -1)
         outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
-        dino_pass = self.dino_net(x).view(positions.shape[0], -1)
-        outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass
+        # dino_pass = self.dino_net(x).view(positions.shape[0], -1)
+        # outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass
 
         return outputs
 
@@ -223,9 +223,9 @@ class GaussianLERFField(Field):
         # clip_pass = self.clip_feature_net(clip_features)
         outputs[GaussianLERFFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
 
-        # epsilon = 1e-5
-        # instance_pass = self.instance_net(features)
-        # outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
+        epsilon = 1e-5
+        instance_pass = self.instance_net(features)
+        outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
         # dino_pass = self.dino_net(clip_features).view(clip_features.shape[0], -1)
         # outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass

@@ -35,6 +35,7 @@ from gsplat.cuda_legacy._wrapper import num_sh_bases
 from pytorch_msssim import SSIM
 from torch.nn import Parameter
 import torch.nn.functional as F
+from torchvision.transforms.functional import resize
 from typing_extensions import Literal
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
@@ -45,7 +46,6 @@ from nerfstudio.engine.optimizers import Optimizers
 
 # need following import for background color override
 from nerfstudio.model_components import renderers
-from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils.colors import get_color
 from nerfstudio.utils.rich_utils import CONSOLE
 
@@ -53,7 +53,7 @@ from nerfstudio.utils.rich_utils import CONSOLE
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.viewer.viewer_elements import ViewerButton, ViewerSlider, ViewerControl, ViewerVec3
 from sms.fields.gaussian_lerf_field import GaussianLERFField
-from sms.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
+from sms.encoders.image_encoder import BaseImageEncoder
 from sms.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 from nerfstudio.utils.colormaps import apply_colormap
@@ -64,8 +64,9 @@ import cv2
 from nerfstudio.models.splatfacto import RGB2SH
 import open3d as o3d
 import time
+from collections import OrderedDict
 
-from sklearn.preprocessing import QuantileTransformer
+from sms.data.utils.dino_dataloader2 import get_img_resolution
 from sklearn.neighbors import NearestNeighbors
 
 def random_quat_tensor(N):
@@ -220,7 +221,12 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """
     camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="off"))
     """Config of the camera optimizer to use"""
-
+    gaussian_dim:int = 64
+    """Dimension the gaussians actually store as features"""
+    dim: int = 64
+    """Output dimension of the feature rendering"""
+    dino_rescale_factor: int = 5
+    """How much to upscale rendered dino for supervision"""
 
 class smsGaussianSplattingModel(SplatfactoModel):
     """Nerfstudio's implementation of Gaussian Splatting
@@ -297,9 +303,21 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 "features_dc": features_dc,
                 "features_rest": features_rest,
                 "opacities": opacities,
+                "dino_feats": torch.nn.Parameter(torch.randn((num_points, self.config.gaussian_dim)))
                 # "obj_ids": obj_ids,
                 # "components": components,
             }
+        )
+        torch.inverse(torch.ones((1, 1), device="cuda:0"))# https://github.com/pytorch/pytorch/issues/90613
+        
+        self.nn = torch.nn.Sequential(
+            torch.nn.Linear(self.config.gaussian_dim, 64, bias = False),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64, bias = False),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64, bias = False),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, self.config.dim, bias = False)
         )
 
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
@@ -338,6 +356,17 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.temp_opacities = None
         self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
+
+    def load_state_dict(self, dict, **kwargs):  # type: ignore
+        super().load_state_dict(dict, **kwargs)
+        # here we need to do some hacky stuff....
+        # Convert gauss_params from ParameterDict to a simple OrderedDict of Tensors
+        # This is critical for allowing backprop through the gauss_params
+        newdict = OrderedDict()
+        for k, v in self.gauss_params.items():
+            newdict[k] = torch.Tensor(v)
+        del self.gauss_params
+        self.gauss_params = newdict
 
     def k_nearest_sklearn(self, x: torch.Tensor, k: int, include_self: bool = False):
         """
@@ -772,6 +801,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             for name in ["means", "scales", "quats", "features_dc", "features_rest", "opacities"]
         }
         gpg["lerf"] = list(self.gaussian_lerf_field.parameters())
+        gpg['dino_feats'] = [self.gauss_params['dino_feats']]
 
         return gpg
 
@@ -782,6 +812,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             Mapping of different parameter groups
         """
         gps = self.get_gaussian_param_groups()
+        gps['nn_projection'] = list(self.nn.parameters())
         self.camera_optimizer.get_param_groups(param_groups=gps)
         return gps
 
@@ -863,6 +894,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             features_rest_crop = self.features_rest[crop_ids]
             scales_crop = self.scales[crop_ids]
             quats_crop = self.quats[crop_ids]
+            dino_crop = self.gauss_params['dino_feats'][crop_ids]
         else:
             opacities_crop = self.opacities
             means_crop = self.means
@@ -870,6 +902,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             features_rest_crop = self.features_rest
             scales_crop = self.scales
             quats_crop = self.quats
+            dino_crop = self.gauss_params['dino_feats']
 
         colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
 
@@ -1040,9 +1073,46 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         max_across[i][max_across[i] < self.relevancy_thresh.value] = 0
                         outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
 
-                
+        # DINO stuff
+        p_size = 14 #TODO: get from dataloader to not hardcode
+        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1050/max(H,W))/p_size
+        dino_K = K.clone()
+        dino_K[:, :2, :] *= downscale
+        h,w = get_img_resolution(H, W)
+        if self.training:
+            dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
+        else:
+            dino_h,dino_w = H,W
+        dino_feats, dino_alpha, _ = rasterization(
+            means=means_crop.detach() if self.training else means_crop,
+            quats=F.normalize(quats_crop,dim=1).detach(),
+            scales=torch.exp(scales_crop).detach(),
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1).detach(),
+            colors=dino_crop,
+            viewmats=viewmat,  # [1, 4, 4]
+            Ks=dino_K,  # [1, 3, 3]
+            width=dino_w,
+            height=dino_h,
+            packed=False,
+            near_plane=0.01,
+            far_plane=1e10,
+            render_mode="RGB",
+            sparse_grad=False,
+            absgrad=False,
+            rasterize_mode=self.config.rasterize_mode,
+        )
+        feat_shape = dino_feats.shape
+
+        dino_feats = torch.where(dino_alpha > 0, dino_feats / dino_alpha.detach(), torch.zeros(self.config.gaussian_dim, device=self.device))
+        nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
+        dino_feats = self.nn(nn_inputs).view(*feat_shape[:-1],-1)
+        if not self.training:
+            dino_feats[dino_alpha.squeeze(-1) < 0.8] = 0
+        outputs['dino'] = dino_feats.squeeze(0)
+        outputs['dino_alpha'] = dino_alpha.squeeze(0)
         # return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "clip": clip_im, "clip_scale": clip}  # type: ignore
         return outputs
+    
     def get_gt_img(self, image: torch.Tensor):
         """Compute groundtruth image with iteration dependent downscale factor for evaluation purpose
 
@@ -1453,17 +1523,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.gauss_params['opacities'] = torch.nn.Parameter(opacities.float())
 
         self.cluster_labels = torch.Tensor(labels)
-        # import pdb; pdb.set_trace()
-        # features_dc = self.gauss_params['features_dc'].detach()
-        # features_rest = self.gauss_params['features_rest'].detach()
-        # for c_id in range(0, labels.max() + 1):
-        #     # set the colors of the gaussians accordingly using colormap from matplotlib
-        #     cluster_mask = np.where(labels == c_id)
-        #     features_dc[cluster_mask] = RGB2SH(colormap[c_id, :3].to(self.gauss_params['features_dc']))
-        #     features_rest[cluster_mask] = 0
 
-        # self.gauss_params['features_dc'] = torch.nn.Parameter(self.gauss_params['features_dc'])
-        # self.gauss_params['features_rest'] = torch.nn.Parameter(self.gauss_params['features_rest'])
         self.rgb1_cluster0 = not self.rgb1_cluster0
         self.cluster_scene.set_disabled(False)
         self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
@@ -1564,5 +1624,4 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         n_phrases_maxs[j] = scale
                         n_phrases_sims[j] = pos_prob
         # print(f"Best scales: {n_phrases_maxs}")#, Words: {self.image_encoder.positives}, Scale List: {scales_list}, All probs: {all_probs}")
-        # import pdb; pdb.set_trace()
         return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs) #, instances_output_im#, relevancy_rasterized
