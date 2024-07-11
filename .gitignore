@@ -10,4 +10,17 @@
 
 *.pth
 
+*.pyc
+
+*.npy
+
 __pycache__/
+
+sms/sample_data/*
+
+sms/configs/__pycache__/*
+sms/data/__pycache__/*
+sms/data/utils/__pycache__/*
+sms/encoders/__pycache__/*
+
+sms/scripts/outputs/*

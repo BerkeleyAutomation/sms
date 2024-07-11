@@ -19,6 +19,8 @@ import torch
 from torchvision import transforms
 from matplotlib import pyplot as plt
 from typing import Tuple
+import os.path as osp
+import argparse
 
 DEBUG_MODE = False
 
@@ -60,10 +62,52 @@ class RGBDClipImagePose():
         (subsample_pts,subsample_indices) = points.subsample(4,random=True)
         subsample_rgbs = rgbs._data[:,subsample_indices]
         return points,rgbs,subsample_pts,subsample_rgbs
-    
+
+def constructRGBDClipImagePoses(image_folder,depth_folder,pose_file_path):
+    cache_dir = image_folder[image_folder[:image_folder.rfind('/')].rfind('/')+1:image_folder.rfind('/')]
+    image_files = sorted(os.listdir(image_folder))
+    depth_files = sorted(os.listdir(depth_folder))
+    pose_data = None
+    # Load JSON data as a dictionary
+    with open(pose_file_path, 'r') as json_file:
+        pose_data = json.load(json_file)
+    intrinsics = np.array([[pose_data['fl_x'],0,pose_data['cx']],
+                        [0,pose_data['fl_y'],pose_data['cy']],
+                        [0,0,1]])
+    width = pose_data['w']
+    height = pose_data['h']
+    i = 0
+    open3d_coordinate_frames = []
+    nerf_frame_to_image_frame = np.array([[1,0,0,0],
+                                        [0,-1,0,0],
+                                        [0,0,-1,0],
+                                        [0,0,0,1]])
+    rgbd_clip_image_poses = []
+    images = []
+    for image_file, depth_file in zip(image_files, depth_files):
+        # Construct full file paths
+        image_path = os.path.join(image_folder, image_file)
+        depth_path = os.path.join(depth_folder, depth_file)
+        world_to_nerf_frame = np.array(pose_data['frames'][i]['transform_matrix'])
+        world_to_image_frame = world_to_nerf_frame @ nerf_frame_to_image_frame
+        world_to_image_rigid_tf = RigidTransform(rotation=world_to_image_frame[:3,:3],translation=world_to_image_frame[:3,3],from_frame="image_frame_"+str(i),to_frame="world")
+        rgb_image = cv2.imread(image_path)
+        rgb_image = cv2.cvtColor(rgb_image,cv2.COLOR_BGR2RGB)
+        images.append(rgb_image)
+        depth_image = np.load(depth_path)
+        rgbd_image_pose = RGBDClipImagePose(rgb_image,depth_image,world_to_image_rigid_tf,intrinsics,width,height)
+        rgbd_clip_image_poses.append(rgbd_image_pose)
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        coordinate_frame.transform(world_to_image_frame)
+        open3d_coordinate_frames.append(coordinate_frame)
+        i += 1
+    return rgbd_clip_image_poses,images,cache_dir
 class ClipDeticLegs():
-    def __init__(self,rgbd_clip_image_poses):
+    def __init__(self,rgbd_clip_image_poses,images,cache_dir):
         self.rgbd_clip_image_poses_ = rgbd_clip_image_poses
+        image_tensor_transform = transforms.ToTensor()
+        tensor_list = [image_tensor_transform(image) for image in images]
+        image_tensor = torch.stack(tensor_list)
         if(len(self.rgbd_clip_image_poses_) <= 0):
             print("Please load in RGBD Clip Image Poses")
             exit()
@@ -83,25 +127,23 @@ class ClipDeticLegs():
         self.clip_downscale_factor: int = 1
         """The downscale factor for the clip pyramid"""
 
-        self.dino_dataloader = DinoDataloader(
-                    # image_list=images,
-                    device=self.device,
-                    cfg={"image_shape": [self.height_,self.width_]},
-                    # cache_path=dino_cache_path,
-                )
         torch.cuda.empty_cache()
 
+        image_encoder = self.network.setup()
+        cache_dir = f"outputs/" + cache_dir
+        clip_cache_path = Path(osp.join(cache_dir, f"clip_{image_encoder.name}"))
         self.clip_interpolator = PyramidEmbeddingDataloader(
+            image_list=image_tensor,
             device=self.device,
             cfg={
                 "tile_size_range": list(self.patch_tile_size_range),
                 "tile_size_res": self.patch_tile_size_res,
                 "stride_scaler": self.patch_stride_scaler,
                 "image_shape": [self.height_,self.width_],
-                "model_name": 'Optimus'
+                "model_name": image_encoder.name
             },
-            model=self.network.setup(),
-            #cache_path=Path('.')
+            cache_path = clip_cache_path,
+            model=image_encoder
         )
         self.transform = transforms.Compose([
             transforms.ToTensor()])
@@ -109,11 +151,11 @@ class ClipDeticLegs():
         self.detic_ = DeticDataloader()
         self.detic_.create()
         self.detic_.default_vocab()
-
-    def tt2clipinterp(self,tt_frame, clip_downscale_factor=1):
+    
+    def tt2clipinterp(self,tt_frame,index, clip_downscale_factor=1):
         to_pil = torchvision.transforms.ToPILImage()
         image = self.transform(to_pil(tt_frame.permute(2, 0, 1).to(torch.uint8)))
-        self.clip_interpolator.generate_clip_interp(image)
+        #clip_interpolator.generate_clip_interp(image)
         H, W = image.shape[1:]
         # scale = torch.tensor(0.1).to(device)
         scaled_height = H//clip_downscale_factor
@@ -121,10 +163,10 @@ class ClipDeticLegs():
 
         x = torch.arange(0, scaled_width*clip_downscale_factor, clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1).to(self.device)
         y = torch.arange(0, scaled_height*clip_downscale_factor, clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1).to(self.device)
-        image_idx_tensor = torch.zeros(scaled_height, scaled_width, 1).to(self.device)
+        image_idx_tensor = torch.ones(scaled_height, scaled_width, 1).to(self.device) * index
         positions = torch.cat((image_idx_tensor, y, x), dim=-1).view(-1, 3).to(int)
         with torch.no_grad():
-            # data["clip"], data["clip_scale"] = clip_interpolator(positions, scale)[0], clip_interpolator(positions, scale)[1]
+            #data["clip"], data["clip_scale"] = clip_interpolator(positions)[0], clip_interpolator(positions)[1]
             data = self.clip_interpolator(positions)[0].view(H, W, -1)
         return data
     
@@ -138,10 +180,10 @@ class ClipDeticLegs():
         
         return normalized_arr
     
-    def relevancy(self,img,query):
+    def relevancy(self,img,query,index):
         positive = []
         positive.append(query)
-        clip_frame = self.tt2clipinterp(img)
+        clip_frame = self.tt2clipinterp(img,index=index)
         H = clip_frame.shape[0]
         W = clip_frame.shape[1]
         self.image_encoder.set_positives(positive)
@@ -152,23 +194,6 @@ class ClipDeticLegs():
         color_norm = self.normalize_array(color_np)
         color_norm = color_norm.astype('float64')
         return color_norm,max_score
-    
-    def tt2dino(self,tt_frame, clip_downscale_factor=1):
-        im = tt_frame.permute(2, 0, 1).to(torch.float32)
-        self.dino_dataloader.generate_dino_embed(im)
-        H, W = im.shape[1:]
-        # scale = torch.tensor(0.1).to(device)
-        scaled_height = H//clip_downscale_factor
-        scaled_width = W//clip_downscale_factor
-
-        x = torch.arange(0, scaled_width*clip_downscale_factor, clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1).to(self.device)
-        y = torch.arange(0, scaled_height*clip_downscale_factor, clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1).to(self.device)
-        image_idx_tensor = torch.zeros(scaled_height, scaled_width, 1).to(self.device)
-        positions = torch.cat((image_idx_tensor, y, x), dim=-1).view(-1, 3).to(int)
-        # print(positions.device)
-        with torch.no_grad():
-            data = self.dino_dataloader(positions.cpu()).view(H, W, -1)
-        return data
     
     def getMaskedPointcloud(self,depth_image,mask):
         rows, cols = depth_image.shape
@@ -194,7 +219,7 @@ class ClipDeticLegs():
         query_time = time.time()
         for rgbd_clip_image_pose in self.rgbd_clip_image_poses_:
             rgb_image = rgbd_clip_image_pose.rgb_image
-            clip_norm,max_score = self.relevancy(torch.from_numpy(rgb_image).cuda(),query)
+            clip_norm,max_score = self.relevancy(torch.from_numpy(rgb_image).cuda(),query,index=i)
             if(max_score > global_max_score):
                 global_max_score = max_score
                 global_max_index = i
@@ -241,9 +266,8 @@ class ClipDeticLegs():
         detic_mask = None
         i = 0
         kernel = np.ones((5,5),np.uint8)
-        if DEBUG_MODE:
-            if not os.path.exists('detic_masks'):
-                os.makedirs('detic_masks')
+        if not os.path.exists('detic_masks'):
+            os.makedirs('detic_masks')
         for mask in out['masks']:
             np_mask = mask.squeeze().detach().cpu().numpy().astype(np.uint8)
             np_mask = cv2.erode(np_mask,kernel,iterations=2)
@@ -294,43 +318,6 @@ class ClipDeticLegs():
         colors_3d = rgb_image[non_zero_indices_needle]
         colors_3d = colors_3d.reshape(-1,3)
         return points_3d,points_3d_image,colors_3d
-    
-def constructRGBDClipImagePoses(image_folder,depth_folder,pose_file_path):
-    image_files = sorted(os.listdir(image_folder))
-    depth_files = sorted(os.listdir(depth_folder))
-    pose_data = None
-    # Load JSON data as a dictionary
-    with open(pose_file_path, 'r') as json_file:
-        pose_data = json.load(json_file)
-    intrinsics = np.array([[pose_data['fl_x'],0,pose_data['cx']],
-                        [0,pose_data['fl_y'],pose_data['cy']],
-                        [0,0,1]])
-    width = pose_data['w']
-    height = pose_data['h']
-    i = 0
-    open3d_coordinate_frames = []
-    nerf_frame_to_image_frame = np.array([[1,0,0,0],
-                                        [0,-1,0,0],
-                                        [0,0,-1,0],
-                                        [0,0,0,1]])
-    rgbd_clip_image_poses = []
-    for image_file, depth_file in zip(image_files, depth_files):
-        # Construct full file paths
-        image_path = os.path.join(image_folder, image_file)
-        depth_path = os.path.join(depth_folder, depth_file)
-        world_to_nerf_frame = np.array(pose_data['frames'][i]['transform_matrix'])
-        world_to_image_frame = world_to_nerf_frame @ nerf_frame_to_image_frame
-        world_to_image_rigid_tf = RigidTransform(rotation=world_to_image_frame[:3,:3],translation=world_to_image_frame[:3,3],from_frame="image_frame_"+str(i),to_frame="world")
-        rgb_image = cv2.imread(image_path)
-        rgb_image = cv2.cvtColor(rgb_image,cv2.COLOR_BGR2RGB)
-        depth_image = np.load(depth_path)
-        rgbd_image_pose = RGBDClipImagePose(rgb_image,depth_image,world_to_image_rigid_tf,intrinsics,width,height)
-        rgbd_clip_image_poses.append(rgbd_image_pose)
-        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-        coordinate_frame.transform(world_to_image_frame)
-        open3d_coordinate_frames.append(coordinate_frame)
-        i += 1
-    return rgbd_clip_image_poses
 
 def visualizePointcloudViser(rgbd_clip_image_poses):
     server = viser.ViserServer()
@@ -356,9 +343,9 @@ def visualizePointcloudViser(rgbd_clip_image_poses):
 
     # Save the point cloud to a PLY file
     o3d.io.write_point_cloud("sparse_pc.ply", pointcloud_o3d)
+    return server
 
-def visualizePointcloudWithQueryViser(rgbd_clip_image_poses,query_point):
-    object_server = viser.ViserServer()
+def visualizePointcloudWithQueryViser(rgbd_clip_image_poses,query_point,object_server):
     i = 0
     for rgbd_clip_image_pose in rgbd_clip_image_poses:
         rgb_image = rgbd_clip_image_pose.rgb_image
@@ -371,15 +358,19 @@ def visualizePointcloudWithQueryViser(rgbd_clip_image_poses,query_point):
         object_server.add_point_cloud(name="pointcloud/" + pose.from_frame,points=pointcloud_world_frame.data.T,colors=rgbcloud_cam_frame.T,point_size=0.005)
         i += 1
     object_server.add_frame(name="query",axes_length = 0.3, axes_radius= 0.01,position=query_point.data)
+    return object_server
 
 if __name__ == "__main__":
     start_time = time.time()
-    image_folder = '/home/lifelong/sms_w_2d/stapler_cup_apple_2_scissors/img'
-    depth_folder = '/home/lifelong/sms_w_2d/stapler_cup_apple_2_scissors/depth'
-    pose_file_path = '/home/lifelong/sms_w_2d/stapler_cup_apple_2_scissors/transforms.json'
-    rgbd_clip_image_poses = constructRGBDClipImagePoses(image_folder,depth_folder,pose_file_path)
-    visualizePointcloudViser(rgbd_clip_image_poses)
-    clip_detic_legs = ClipDeticLegs(rgbd_clip_image_poses)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data',help='data folder that internally contains img folder, depth folder, and transforms.json',required=True)
+    args = parser.parse_args()
+    image_folder = args.data +'/img'
+    depth_folder = args.data +'/depth'
+    pose_file_path = args.data +'/transforms.json'
+    rgbd_clip_image_poses,images,cache_dir = constructRGBDClipImagePoses(image_folder,depth_folder,pose_file_path)
+    server = visualizePointcloudViser(rgbd_clip_image_poses)
+    clip_detic_legs = ClipDeticLegs(rgbd_clip_image_poses,images,cache_dir)
     another_query = True
     end_time = time.time()
     print("Non query time: " + str(end_time - start_time))
@@ -388,7 +379,7 @@ if __name__ == "__main__":
         weighted_average_point_world_frame = clip_detic_legs.localizeQuery(query)
         if DEBUG_MODE:
             plt.show()
-        visualizePointcloudWithQueryViser(rgbd_clip_image_poses,weighted_average_point_world_frame)
+        server = visualizePointcloudWithQueryViser(rgbd_clip_image_poses,weighted_average_point_world_frame,server)
         response = input("Do you want to input another query? Type y/n")
         if(response == 'y'):
             another_query = True
