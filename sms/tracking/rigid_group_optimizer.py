@@ -38,7 +38,7 @@ class RigidGroupOptimizer:
     def __init__(
         self,
         sms_model: smsGaussianSplattingModel,
-        dino_loader: DinoDataloader,
+        # dino_loader: DinoDataloader,
         group_masks: List[torch.Tensor],
         group_labels: torch.Tensor,
         dataset_scale: float,
@@ -60,7 +60,7 @@ class RigidGroupOptimizer:
         self.sms_model.gauss_params["quats"] = self.sms_model.gauss_params[
             "quats"
         ].detach().clone()
-        self.dino_loader = dino_loader
+        # self.dino_loader = dino_loader
         self.group_labels = group_labels
         self.group_masks = group_masks
         # store a 7-vec of trans, rotation for each group

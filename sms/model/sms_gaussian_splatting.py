@@ -429,18 +429,11 @@ class smsGaussianSplattingModel(SplatfactoModel):
     def add_deprojected_means(self, deprojected, colors, optimizers: Optimizers, step):
         if len(deprojected) > 0:
             with torch.no_grad():
-                # import pdb; pdb.set_trace()
-                # deprojected = torch.stack(deprojected, dim=0).to(self.device)
-                # colors = torch.stack(colors, dim=0).to(self.device)
+
                 deprojected = deprojected[0]
                 colors = colors[0]
                 numpts = len(deprojected)
                 avg_dist = torch.ones_like(deprojected.mean(dim=-1).unsqueeze(-1)) * 0.02 #* 0.01
-
-                # if self.clrs == None:
-                #     self.clrs = torch.nn.Parameter(torch.cat([self.means.detach(), colors], dim=0))
-                # else:
-                #     self.clrs = torch.nn.Parameter(torch.cat([self.clrs.detach(), colors], dim=0))
 
                 dim_sh = num_sh_bases(self.config.sh_degree)
                 if colors.max() > 1.0:
@@ -461,14 +454,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 self.gauss_params['features_dc'] = torch.nn.Parameter(torch.cat([self.gauss_params['features_dc'].detach(), shs[:, 0, :].to(self.device)]))
                 self.gauss_params['features_rest'] = torch.nn.Parameter(torch.cat([self.gauss_params['features_rest'].detach(), shs[:, 1:, :].to(self.device)]))
                 self.gauss_params['opacities'] = torch.nn.Parameter(torch.cat([self.gauss_params['opacities'].detach(), torch.logit(self.config.init_opacity * torch.ones(numpts, 1)).to(self.device)], dim=0))
-                # Segmentation
-                # if len(comps) > 0:
-                #     new_comp = torch.tensor(comps[0], dtype=torch.float).to(self.device)
-                #     self.max_comp = self.max_comp+new_comp.max().item()
-                #     import pdb; pdb.set_trace()
-                #     self.gauss_params['components'] = torch.nn.Parameter(torch.cat([self.gauss_params['components'].detach(), new_comp.to(self.device)], dim=0), requires_grad=False)
-                # else:
-                #     self.gauss_params['components'] = torch.nn.Parameter(torch.cat([self.gauss_params['components'].detach(), torch.zeros(numpts, dtype=torch.float).to(self.device)], dim=0), requires_grad=False)
+
                 self.xys_grad_norm = None
                 self.vis_counts = None
                 self.max_2Dsize = None
@@ -483,25 +469,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         continue
                     new_param = [param[0][-num_new_points:]]
                     self.add_new_params_to_optimizer(optimizers.optimizers[group], new_param)
-
-                # if self.num_points == self.config.num_random + numpts:
-                #     print("removing random init")
-                #     with torch.no_grad():
-                #         mask = torch.cat(
-                #             (
-                #             torch.ones(self.config.num_random, device=self.device, dtype=torch.bool),
-                #             torch.zeros(self.num_points - self.config.num_random, device=self.device, dtype=torch.bool)
-                #             )
-                #         )
-                #         deleted_mask = self.cull_gaussians(mask, max(0.02, self.config.init_opacity - 0.05))
-                #         # import pdb; pdb.set_trace()
-                #         self.remove_from_all_optim(optimizers, deleted_mask)
-            
-            ## Deproject Debug
-            # means_freeze = self.means.data.clone().cpu()
-            # colors_freeze = self.clrs.data.clone().cpu()
-            # self.viewer_control.viser_server.add_point_cloud("deprojected", means_freeze.numpy(force=True) * VISER_NERFSTUDIO_SCALE_RATIO, colors_freeze.numpy(force=True), 0.1)
-            # import pdb; pdb.set_trace()
 
             colors = colors.detach()
             deprojected = deprojected.detach()
@@ -1422,7 +1389,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
         """Cluster the scene, and assign gaussian colors based on the clusters.
         Also populates self.crop_group_list with the clusters group indices."""
 
-        # self._queue_state()  # Save current state
         self.cluster_scene.set_disabled(True)  # Disable user from clustering, while clustering
 
         
@@ -1526,6 +1492,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         self.rgb1_cluster0 = not self.rgb1_cluster0
         self.cluster_scene.set_disabled(False)
+        
         self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
 
     def _togglergbcluster(self, button: ViewerButton):

@@ -24,7 +24,7 @@ from sms.tracking.rigid_group_optimizer import RigidGroupOptimizer
 # from toad.toad_object import GraspableToadObject
 
 
-class ToadOptimizer:
+class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
     Operates in camera frame, not world frame."""
 
@@ -126,7 +126,7 @@ class ToadOptimizer:
 
         self.optimizer = RigidGroupOptimizer(
             self.pipeline.model,
-            self.pipeline.datamanager.dino_dataloader,
+            # self.pipeline.datamanager.dino_dataloader,
             cam2world_ns,
             group_masks=group_masks,
             group_labels=group_labels,
@@ -154,7 +154,7 @@ class ToadOptimizer:
         self.pipeline.model.gauss_params["quats"] = self.orig_quats.clone()
         self.optimizer = RigidGroupOptimizer(
             self.pipeline.model,
-            self.pipeline.datamanager.dino_dataloader,
+            # self.pipeline.datamanager.dino_dataloader,
             self.cam2world_ns,
             group_masks=self.group_masks,
             group_labels=self.group_labels,
