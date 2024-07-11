@@ -450,7 +450,7 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             data["instance_masks"] = masks.squeeze(1)
         
         # Masks out the background from RGB training, which is always the last detic_mask for the image
-        data["mask"] = ~detic_masks[-1].squeeze(0).unsqueeze(-1)
+        # data["mask"] = ~detic_masks[-1].squeeze(0).unsqueeze(-1)
         
         self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
 
