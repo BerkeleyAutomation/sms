@@ -88,22 +88,15 @@ class DeticDataloader(FeatureDataloader):
         self.default_vocab()
 
         if image_list is not None:
-            # return NotImplementedError
-            # import pdb; pdb.set_trace()
+
             start_time = time.time()
             for idx, img in enumerate(tqdm(image_list, desc="Detic Detector", leave=False)):
                 H, W = img.shape[-2:]
-                # import pdb; pdb.set_trace()
                 img = (img.permute(1, 2, 0).numpy()*255).astype(np.uint8)
-                # plt.imsave(f"tabletop_BWW_rgb_out{idx}.png", img)
-                # import pdb; pdb.set_trace()
-                # start_time = time.time()
+
                 output = self.detic_predictor(img[:, :, ::-1])
                 instances = output["instances"].to('cpu')
-                # v = Visualizer(img, self.metadata)
-                # out = v.draw_instance_predictions(instances)
-                # plt.imsave(f"tabletop_BWW_detic_out{idx}.png", out.get_image())
-                # import pdb; pdb.set_trace()
+
                 boxes = instances.pred_boxes.tensor.numpy()
 
                 masks = None

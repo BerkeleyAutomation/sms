@@ -16,7 +16,7 @@ from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.viewer.viewer import Viewer
 from nerfstudio.configs.base_config import ViewerConfig
 # from garfield.garfield_gaussian_pipeline import GarfieldGaussianPipeline
-from sms.sms_pipeline import smsPipeline
+from sms.sms_data_pipeline import smsdataPipeline
 from nerfstudio.utils import writer
 from nerfstudio.models.splatfacto import SH2RGB
 
@@ -52,14 +52,14 @@ class Optimizer:
     def __init__(
         self,
         config_path: Path,  # path to the nerfstudio config file
-        K: np.ndarray,  # camera intrinsics
-        width: int,  # camera width
-        height: int,  # camera height
-        init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
+        # K: np.ndarray,  # camera intrinsics
+        # width: int,  # camera width
+        # height: int,  # camera height
+        # init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
     ):
-        # Load the smsPipeline.
+        # Load the smsdataPipeline.
         train_config, self.pipeline, _, _ = eval_setup(config_path)
-        assert isinstance(self.pipeline, smsPipeline)
+        assert isinstance(self.pipeline, smsdataPipeline)
         train_config.logging.local_writer.enable = False
 
         assert self.pipeline.datamanager.train_dataset is not None
@@ -77,6 +77,7 @@ class Optimizer:
             train_lock=Lock()
         )
         assert self.viewer_ns.train_lock is not None
+
         group_labels, group_masks = self._setup_crops_and_groups()
         self.num_groups = len(group_masks)
 
@@ -88,6 +89,7 @@ class Optimizer:
         # H = H[:3, :]
         # init_cam_pose = torch.tensor(H).float().reshape(1, 3, 4)
 
+        '''
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)
 
@@ -115,9 +117,9 @@ class Optimizer:
         cam2world_ns.rescale_output_resolution(
             self.MATCH_RESOLUTION / max(width, height)
         )
-
+        '''
         # Set up the optimizer.
-        self.cam2world_ns = cam2world_ns
+        # self.cam2world_ns = cam2world_ns
         self.group_masks, self.group_labels = group_masks, group_labels
         self.dataset_scale = dataset_scale
 
@@ -127,7 +129,7 @@ class Optimizer:
         self.optimizer = RigidGroupOptimizer(
             self.pipeline.model,
             # self.pipeline.datamanager.dino_dataloader,
-            cam2world_ns,
+            # cam2world_ns,
             group_masks=group_masks,
             group_labels=group_labels,
             dataset_scale=dataset_scale,
@@ -165,20 +167,20 @@ class Optimizer:
     def _setup_crops_and_groups(self) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """Set up the crops and groups for the optimizer, interactively."""
         cluster_labels = None
-
         try:
-            self.pipeline.load_state()
-            cluster_labels = self.pipeline.model.cluster_labels
-        except FileNotFoundError:
-            print("No state file found, interacively set up crops and groups here.")
+            # self.pipeline.load_state()
+            cluster_labels = torch.Tensor(self.pipeline.model.cluster())
+        except TypeError:
+            print("Model not populated yet. Please wait...")
             # Wait for the user to set up the crops and groups.
-            while cluster_labels is None:
-                _ = input("Please setup the crops and groups.... (enter to continue)")
-                cluster_labels = self.pipeline.model.cluster_labels
+            while getattr(self.pipeline.model, "best_scales") is None:
+                time.sleep(0.1)
+            _ = input("Model populated (enter to continue)")
+            cluster_labels = torch.tensor(self.pipeline.model.cluster(), dtype=torch.int32)
 
-        labels = self.pipeline.model.cluster_labels.int().cuda()
-        group_masks = [(cid == labels).cuda() for cid in range(labels.max() + 1)]
-        return labels, group_masks
+        # labels = self.pipeline.cluster_labels.int().cuda()
+        group_masks = [(cid == cluster_labels).cuda() for cid in range(cluster_labels.max().item() + 1)]
+        return cluster_labels, group_masks
 
     def set_frame(self, rgb, depth) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""

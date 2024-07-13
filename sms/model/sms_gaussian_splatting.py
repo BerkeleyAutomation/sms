@@ -252,6 +252,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.postBA = False
         self.loaded_ckpt = False
         self.localized_query = None
+        self.best_scales = None
+        
 
     def populate_modules(self):
         if self.seed_points is not None and not self.config.random_init:
@@ -303,7 +305,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 "features_dc": features_dc,
                 "features_rest": features_rest,
                 "opacities": opacities,
-                "dino_feats": torch.nn.Parameter(torch.randn((num_points, self.config.gaussian_dim)))
+                "dino_feats": torch.nn.Parameter(torch.randn((num_points, self.config.gaussian_dim))),
+                "cluster_labels": torch.nn.Parameter(torch.zeros((num_points, 1))),
                 # "obj_ids": obj_ids,
                 # "components": components,
             }
@@ -1026,14 +1029,14 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
                 if not self.training:
                     # N x B x 1; N
-                    max_across, self.best_scales = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
+                    max_across, self.best_scales,instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
                     #, instances_out
 
                     # assert not torch.isnan(instances_out).any()
-                    # if not torch.isnan(instances_out).any():
-                    #     outputs["group_feats"] = instances_out
-                    # else:
-                    #     print("instance loss may be nan")
+                    if not torch.isnan(instances_out).any():
+                        outputs["group_feats"] = instances_out
+                    else:
+                        print("instance loss may be nan")
 
                     for i in range(len(self.image_encoder.positives)):
                         # import pdb; pdb.set_trace()
@@ -1391,8 +1394,24 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         self.cluster_scene.set_disabled(True)  # Disable user from clustering, while clustering
 
+        labels = self.cluster()
+
+        opacities = self.gauss_params['opacities'].detach()
+        opacities[labels < 0] = -100  # hide unclustered gaussians
+        self.gauss_params['opacities'] = torch.nn.Parameter(opacities.float())
+
+        self.cluster_labels = torch.Tensor(labels)
+
+        self.gauss_params['cluster_labels'] = self.cluster_labels.unsqueeze(-1)
+
+        self.rgb1_cluster0 = not self.rgb1_cluster0
+        self.cluster_scene.set_disabled(False)
         
-        # positions = self.gauss_params['means'].detach()
+        self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
+    
+    def cluster(self, best_scale=None):
+        if best_scale is None:
+            best_scale = self.best_scales[0].to(self.device)
         positions = self.means.data.clone().detach()
         distances, indicies = self.k_nearest_sklearn(positions, 3, True)
         distances = torch.from_numpy(distances).to(self.device)
@@ -1404,7 +1423,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         hash_encoding = hash_encoding.view(-1, 4, hash_encoding.shape[1])
         hash_encoding = (hash_encoding * weights.unsqueeze(-1))
         hash_encoding = hash_encoding.sum(dim=1)
-        group_feats = self.gaussian_lerf_field.get_outputs_from_feature(hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).cpu().detach().numpy()
+        group_feats = self.gaussian_lerf_field.get_outputs_from_feature(hash_encoding, best_scale * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).cpu().detach().numpy()
         positions = positions.cpu().numpy()
 
         start = time.time()
@@ -1439,7 +1458,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         # Run cuml-based HDBSCAN
         clusterer = HDBSCAN(
-            cluster_selection_epsilon=0.1,
+            cluster_selection_epsilon=0.07,
             min_samples=30,
             min_cluster_size=30,
             allow_single_cluster=True,
@@ -1481,20 +1500,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
             clusterer.labels_ = labels
 
         labels = clusterer.labels_
-
-        # colormap = self.colormap
-
-        opacities = self.gauss_params['opacities'].detach()
-        opacities[labels < 0] = -100  # hide unclustered gaussians
-        self.gauss_params['opacities'] = torch.nn.Parameter(opacities.float())
-
-        self.cluster_labels = torch.Tensor(labels)
-
-        self.rgb1_cluster0 = not self.rgb1_cluster0
-        self.cluster_scene.set_disabled(False)
-        
-        self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
-
+        return labels
+    
     def _togglergbcluster(self, button: ViewerButton):
         self.rgb1_cluster0 = not self.rgb1_cluster0
         self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
@@ -1578,7 +1585,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         for i, scale in enumerate(scales_list):
             with torch.no_grad():
                 out = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device)) #[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
-                # instances_output_im = out[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
+                instances_output_im = out[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
                 clip_output_im = out[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
 
             for j in range(n_phrases):
@@ -1591,4 +1598,4 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         n_phrases_maxs[j] = scale
                         n_phrases_sims[j] = pos_prob
         # print(f"Best scales: {n_phrases_maxs}")#, Words: {self.image_encoder.positives}, Scale List: {scales_list}, All probs: {all_probs}")
-        return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs) #, instances_output_im#, relevancy_rasterized
+        return torch.stack(n_phrases_sims), torch.Tensor(n_phrases_maxs), instances_output_im#, relevancy_rasterized

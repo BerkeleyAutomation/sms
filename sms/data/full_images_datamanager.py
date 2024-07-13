@@ -439,10 +439,10 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
 
         with torch.no_grad():
             # detic_masks = detic_out["masks_filtered"]
-            perm = torch.randperm(len(detic_masks)-1)
+            perm = torch.randperm(len(detic_masks))
             assert len(detic_masks) > 0, "No masks found"
 
-            num_samp = min(len(detic_masks)-1, self.config.num_random_masks)
+            num_samp = min(len(detic_masks), self.config.num_random_masks)
             idx = perm[:num_samp]
             masks = detic_masks[idx].squeeze(1)
 
