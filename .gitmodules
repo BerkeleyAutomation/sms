@@ -1,0 +1,3 @@
+[submodule "sms/ur5_interface/ur5_interface/ur5py"]
+	path = sms/ur5_interface/ur5_interface/ur5py
+	url = https://github.com/BerkeleyAutomation/ur5py.git
