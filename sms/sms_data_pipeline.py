@@ -274,10 +274,14 @@ class smsdataPipeline(VanillaPipeline):
         self.reset_state.set_disabled(False)
 
 
-    def _reset_state(self, button: ViewerButton):
+    def _reset_state(self, button: ViewerButton, pop = True):
         """Revert to previous saved state"""
+
         assert len(self.state_stack) > 0, "No previous state to revert to"
-        prev_state = self.state_stack.pop()
+        if pop:
+            prev_state = self.state_stack.pop()
+        else:
+            prev_state = self.state_stack[-1]
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name]
 
@@ -306,13 +310,14 @@ class smsdataPipeline(VanillaPipeline):
     def _reset_crop_group_list(self, button: ViewerButton):
         """Reset the crop group list"""
         self.crop_group_list = []
+        self.keep_inds = []
         self.add_crop_to_group_list.set_disabled(True)
         self.view_crop_group_list.set_disabled(True)
     
     def _add_crop_to_group_list(self, button: ViewerButton):
         """Add the current crop to the group list"""
         self.crop_group_list.append(self.crop_group[0])
-        self._reset_state(None)
+        self._reset_state(None, pop=False)
         self.view_crop_group_list.set_disabled(False)
 
     def _view_crop_group_list(self, button: ViewerButton):
@@ -321,12 +326,10 @@ class smsdataPipeline(VanillaPipeline):
         if len(self.state_stack) == 0:
             return
 
-        # keep_inds = self.crop_group[0]
         keep_inds = []
         for inds in self.crop_group_list:
             keep_inds.extend(inds)
-        import pdb; pdb.set_trace()
-
+        keep_inds = torch.stack(keep_inds)
         prev_state = self.state_stack[-1]
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
@@ -364,9 +367,6 @@ class smsdataPipeline(VanillaPipeline):
         keep_list = []
 
         if self.model.cluster_labels == None:
-            # Iterate over different scales, to get the a range of possible groupings.
-            # for s in tqdm.tqdm(torch.linspace(0, 1.5, 30)):
-                # Calculate the grouping features, and calculate the affinity between click point and scene
             instances = self.model.get_grouping_at_points(positions)  # (1+N, 256)
             click_instance = instances[0]
             # import pdb; pdb.set_trace()
@@ -415,24 +415,12 @@ class smsdataPipeline(VanillaPipeline):
             # Choose the cluster that contains the click point. If there is none, move to the next scale.
             cluster_inds = clusters[np.isin(keeps, sphere_inds)]
             cluster_inds = cluster_inds[cluster_inds != -1]
-            # if len(cluster_inds) == 0:
-            #     continue
+
             cluster_ind = cluster_inds[0]
 
             keeps = keeps[np.where(clusters == cluster_ind)]
 
-            # if prev_group is None:
-            #     prev_group = keeps
-            #     keep_list.append(keeps)
-            #     continue
 
-            # keeps = torch.cat([keeps])
-            # keeps = torch.unique(keeps)
-
-            # # Deduplication, based on the # of current points included in the previous group.
-            # overlap = torch.isin(keeps, prev_group).sum()
-            # if overlap < 0.8 * len(keeps):
-            #     prev_group = keeps
             keep_list.append(keeps)
 
             if len(keep_list) == 0:
@@ -461,28 +449,6 @@ class smsdataPipeline(VanillaPipeline):
         prev_state = self.state_stack[-1]
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
-
-    # def _update_crop_vis(self, number: ViewerSlider):
-    #     """Update which click-based crop to visualize -- this requires that _crop_to_click has been called."""
-    #     # If there is no click-based crop or saved state to crop from, do nothing
-
-    #     if len(self.crop_group) == 0:
-    #         return
-    #     if len(self.state_stack) == 0:
-    #         return
-        
-    #     # Clamp the number to be within the range of possible crops
-    #     # if number.value > len(self.crop_group) - 1:
-    #     #     number.value = len(self.crop_group) - 1
-    #     #     return
-    #     # elif number.value < 0:
-    #     #     number.value = 0
-    #     #     return
-
-    #     keep_inds = self.crop_group[0]
-    #     prev_state = self.state_stack[-1]
-    #     for name in self.model.gauss_params.keys():
-    #         self.model.gauss_params[name] = prev_state[name][keep_inds]
 
     def _drag_current_crop(self, button: ViewerButton):
         """Add a transform control to the current scene, and update the model accordingly."""

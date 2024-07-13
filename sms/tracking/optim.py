@@ -78,7 +78,10 @@ class Optimizer:
         )
         assert self.viewer_ns.train_lock is not None
 
+        self.keep_inds = None
+
         group_labels, group_masks = self._setup_crops_and_groups()
+
         self.num_groups = len(group_masks)
 
         # Initialize camera -- in world coordinates.
@@ -175,23 +178,11 @@ class Optimizer:
             # Wait for the user to set up the crops and groups.
             while getattr(self.pipeline.model, "best_scales") is None:
                 time.sleep(0.1)
-            while True:
-                time.sleep(0.1)
-            # eps = input("Model populated (enter an espilon value e.g. 0.1 for hdbscan to continue)")
-            # if eps == "":
-            #     eps = 0.1
-            # else:
-            #     eps = float(eps)
-            # cluster_labels = torch.tensor(self.pipeline.model.cluster(eps), dtype=torch.int32)
-            # while cluster_labels is None:
-            #     eps = input("No clusters found. Try another espilon value")
-            #     if eps == "":
-            #         eps = 0.1
-            #     else:
-            #         eps = float(eps)
-            #     cluster_labels = torch.tensor(self.pipeline.model.cluster(eps), dtype=torch.int32)
+            _ = input("Model populated (interactively crop and press enter to continue)")
+            self.keep_inds = self.pipeline.keep_inds
+            cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
 
-        # labels = self.pipeline.cluster_labels.int().cuda()
+        _, cluster_labels = torch.unique(cluster_labels, return_inverse=True)
         group_masks = [(cid == cluster_labels).cuda() for cid in range(cluster_labels.max().item() + 1)]
         return cluster_labels, group_masks
 
