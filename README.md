@@ -63,3 +63,16 @@ Specific commit of gsplat is required
 python -m pip uninstall gsplat
 python -m pip install git+https://github.com/nerfstudio-project/gsplat.git@d01e6c0561f5c51d4372ff6b1d3c45f7b1e28fd5
 ```
+
+## UR5 Python Installation
+```
+pip install ur_rtde==1.4.2
+pip install cowsay
+pip install opt-einsum
+cd ~/sms/sms/ur5_interface/ur5_interface/ur5py
+pip install -e .
+cd ~/sms/sms/ur5_interface/ur5_interface/RAFT_Stereo
+pip install -e .
+cd ~/sms/sms/ur5_interface
+pip install -e .
+```
