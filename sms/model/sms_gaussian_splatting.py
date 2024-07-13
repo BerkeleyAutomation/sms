@@ -37,6 +37,7 @@ from torch.nn import Parameter
 import torch.nn.functional as F
 from torchvision.transforms.functional import resize
 from typing_extensions import Literal
+from torchtyping import TensorType
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
 from nerfstudio.cameras.cameras import Cameras
@@ -52,9 +53,9 @@ from nerfstudio.utils.rich_utils import CONSOLE
 # sms imports
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.viewer.viewer_elements import ViewerButton, ViewerSlider, ViewerControl, ViewerVec3
-from sms.fields.gaussian_lerf_field import GaussianLERFField
+from sms.fields.gaussian_field import GaussianField
 from sms.encoders.image_encoder import BaseImageEncoder
-from sms.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
+from sms.field_components.gaussian_fieldheadnames import GaussianFieldHeadNames
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 from nerfstudio.utils.colormaps import apply_colormap
 import viser.transforms as vtf
@@ -270,7 +271,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         quats = torch.nn.Parameter(random_quat_tensor(num_points))
         dim_sh = num_sh_bases(self.config.sh_degree)
 
-        self.gaussian_lerf_field = GaussianLERFField()
+        self.gaussian_field = GaussianField()
         self.datamanager = self.kwargs["datamanager"]
         self.image_encoder: BaseImageEncoder = self.kwargs["image_encoder"]
 
@@ -770,7 +771,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             name: [self.gauss_params[name]]
             for name in ["means", "scales", "quats", "features_dc", "features_rest", "opacities"]
         }
-        gpg["lerf"] = list(self.gaussian_lerf_field.parameters())
+        gpg["lerf"] = list(self.gaussian_field.parameters())
         gpg['dino_feats'] = [self.gauss_params['dino_feats']]
 
         return gpg
@@ -969,7 +970,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 field_output = None
                 if self.training and self.step>self.config.warmup_length and (self.step % reset_interval > self.num_train_data + self.config.refine_every  or self.step < (self.config.reset_alpha_every * self.config.refine_every)):
                     # with torch.no_grad():
-                    clip_hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
+                    clip_hash_encoding = self.gaussian_field.get_hash(self.means)
                     # downscale_factor = camera.metadata["clip_downscale_factor"]
                     # print("K: ", K)
 
@@ -1017,14 +1018,14 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     clip_scale = self.datamanager.curr_scale * torch.ones((self.random_pixels.shape[0],1),device=self.device)
                     clip_scale = clip_scale * clip_H * (depth_im.view(-1, 1)[self.random_pixels] / camera.fy.item())
 
-                    field_output = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(clip_H*clip_W, -1), clip_scale, self.random_pixels)
+                    field_output = self.gaussian_field.get_outputs_from_feature(field_output.view(clip_H*clip_W, -1), clip_scale, self.random_pixels)
 
-                    clip_output = field_output[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
+                    clip_output = field_output[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
 
                     outputs["clip"] = clip_output
                     outputs["clip_scale"] = clip_scale
 
-                    outputs["instance"] = field_output[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32)
+                    outputs["instance"] = field_output[GaussianFieldHeadNames.INSTANCE].to(dtype=torch.float32)
 
 
                 if not self.training:
@@ -1242,11 +1243,11 @@ class smsGaussianSplattingModel(SplatfactoModel):
             weights = torch.sigmoid(self.opacities[indicies].view(-1, 4))
             weights = torch.nn.Softmax(dim=-1)(weights)
             points = means_freeze[indicies]
-            clip_hash_encoding = self.gaussian_lerf_field.get_hash(points)
+            clip_hash_encoding = self.gaussian_field.get_hash(points)
             clip_hash_encoding = clip_hash_encoding.view(-1, 4, clip_hash_encoding.shape[1])
             clip_hash_encoding = (clip_hash_encoding * weights.unsqueeze(-1))
             clip_hash_encoding = clip_hash_encoding.sum(dim=1)
-            clip_feats = self.gaussian_lerf_field.get_outputs_from_feature(clip_hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
+            clip_feats = self.gaussian_field.get_outputs_from_feature(clip_hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
             relevancy = self.image_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.num_points, -1)
             
             labels = self.cluster_labels.numpy()
@@ -1292,9 +1293,9 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
     def crop_to_word_cb(self,element):
         with torch.no_grad():
-            # clip_feats = self.gaussian_lerf_field.get_outputs_from_feature(self.clip_hash / self.clip_hash.norm(dim=-1,keepdim=True), self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
-            # clip_feats = self.gaussian_lerf_field.get_outputs(self.means, self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
-            # clip_feats = self.gaussian_lerf_field.get_outputs(self.means, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
+            # clip_feats = self.gaussian_field.get_outputs_from_feature(self.clip_hash / self.clip_hash.norm(dim=-1,keepdim=True), self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
+            # clip_feats = self.gaussian_field.get_outputs(self.means, self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
+            # clip_feats = self.gaussian_field.get_outputs(self.means, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
 
             # Do K nearest neighbors for each point and then avg the clip hash for each point based on the KNN
             distances, indicies = self.k_nearest_sklearn(self.means.data, 3, True)
@@ -1303,11 +1304,11 @@ class smsGaussianSplattingModel(SplatfactoModel):
             weights = torch.sigmoid(self.opacities[indicies].view(-1, 4))
             weights = torch.nn.Softmax(dim=-1)(weights)
             points = self.means[indicies]
-            clip_hash_encoding = self.gaussian_lerf_field.get_hash(points)
+            clip_hash_encoding = self.gaussian_field.get_hash(points)
             clip_hash_encoding = clip_hash_encoding.view(-1, 4, clip_hash_encoding.shape[1])
             clip_hash_encoding = (clip_hash_encoding * weights.unsqueeze(-1))
             clip_hash_encoding = clip_hash_encoding.sum(dim=1)
-            clip_feats = self.gaussian_lerf_field.get_outputs_from_feature(clip_hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
+            clip_feats = self.gaussian_field.get_outputs_from_feature(clip_hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
             relevancy = self.image_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.num_points, -1)
             color = apply_colormap(relevancy[..., 0:1])
             self.crop_ids = (relevancy[..., 0] / relevancy[..., 0].max() > self.relevancy_thresh.value)
@@ -1409,9 +1410,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         
         self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
     
-    def cluster(self, best_scale=None):
-        if best_scale is None:
-            best_scale = self.best_scales[0].to(self.device)
+    def cluster(self, eps = 0.1):
         positions = self.means.data.clone().detach()
         distances, indicies = self.k_nearest_sklearn(positions, 3, True)
         distances = torch.from_numpy(distances).to(self.device)
@@ -1419,11 +1418,11 @@ class smsGaussianSplattingModel(SplatfactoModel):
         weights = torch.sigmoid(self.opacities[indicies].view(-1, 4))
         weights = torch.nn.Softmax(dim=-1)(weights)
         points = positions[indicies]
-        hash_encoding = self.gaussian_lerf_field.get_hash(points)
+        hash_encoding = self.gaussian_field.get_hash(points)
         hash_encoding = hash_encoding.view(-1, 4, hash_encoding.shape[1])
         hash_encoding = (hash_encoding * weights.unsqueeze(-1))
         hash_encoding = hash_encoding.sum(dim=1)
-        group_feats = self.gaussian_lerf_field.get_outputs_from_feature(hash_encoding, best_scale * torch.ones(self.num_points, 1, device=self.device))[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).cpu().detach().numpy()
+        group_feats = self.gaussian_field.get_outputs_from_feature(hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.INSTANCE].to(dtype=torch.float32).cpu().detach().numpy()
         positions = positions.cpu().numpy()
 
         start = time.time()
@@ -1458,7 +1457,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         # Run cuml-based HDBSCAN
         clusterer = HDBSCAN(
-            cluster_selection_epsilon=0.07,
+            cluster_selection_epsilon=eps,
             min_samples=30,
             min_cluster_size=30,
             allow_single_cluster=True,
@@ -1505,7 +1504,17 @@ class smsGaussianSplattingModel(SplatfactoModel):
     def _togglergbcluster(self, button: ViewerButton):
         self.rgb1_cluster0 = not self.rgb1_cluster0
         self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
-        
+    
+    @torch.no_grad()
+    def get_grouping_at_points(self, positions: TensorType) -> TensorType:
+        """Get the grouping features at a set of points."""
+        # Apply distortion, calculate hash values, then normalize
+
+        x = self.gaussian_field.get_hash(positions)
+        x = x / x.norm(dim=-1, keepdim=True)
+
+        return self.gaussian_field.get_instance_outputs_from_feature(x)
+    
     def _export_visible_gaussians(self, button: ViewerButton):
         """Export the visible gaussians to a .ply file"""
         # location to save
@@ -1558,7 +1567,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         BLOCK_WIDTH = 16
 
         with torch.no_grad():
-            hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
+            hash_encoding = self.gaussian_field.get_hash(self.means)
 
             field_output, alpha, info = rasterization(
                         means=means_crop,
@@ -1584,9 +1593,9 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         for i, scale in enumerate(scales_list):
             with torch.no_grad():
-                out = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device)) #[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
-                instances_output_im = out[GaussianLERFFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
-                clip_output_im = out[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
+                out = self.gaussian_field.get_outputs_from_feature(field_output.view(H*W, -1), scale * torch.ones(H*W, 1, device=self.device)) #[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
+                instances_output_im = out[GaussianFieldHeadNames.INSTANCE].to(dtype=torch.float32).view(H, W, -1)
+                clip_output_im = out[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32).view(H, W, -1)
 
             for j in range(n_phrases):
                 if preset_scales is None or j == i:

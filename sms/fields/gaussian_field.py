@@ -28,15 +28,8 @@ from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.embedding import Embedding
 from nerfstudio.field_components.encodings import HashEncoding, NeRFEncoding, SHEncoding
-from sms.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
-from nerfstudio.field_components.field_heads import (
-    FieldHeadNames,
-    PredNormalsFieldHead,
-    SemanticFieldHead,
-    TransientDensityFieldHead,
-    TransientRGBFieldHead,
-    UncertaintyFieldHead,
-)
+from sms.field_components.gaussian_fieldheadnames import GaussianFieldHeadNames
+
 from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion, SceneContraction
 from nerfstudio.fields.base_field import Field, get_normalized_directions
@@ -47,7 +40,7 @@ except ImportError:
     pass
 
 
-class GaussianLERFField(Field):
+class GaussianField(Field):
     """Compound Field that uses TCNN
 
     Args:
@@ -100,7 +93,7 @@ class GaussianLERFField(Field):
         self.register_buffer("log2_hashmap_size", torch.tensor(log2_hashmap_size))
         self.clip_encs = torch.nn.ModuleList(
             [
-                GaussianLERFField._get_encoding(
+                GaussianField._get_encoding(
                     grid_resolutions[i][0], grid_resolutions[i][1], grid_layers[i], indim=3, hash_size=grid_sizes[i], features_per_level=n_features_level,
                 ) for i in range(len(grid_layers))
             ]
@@ -170,7 +163,7 @@ class GaussianLERFField(Field):
         )
         return enc
 
-    def get_outputs(self, positions, clip_scales) -> Dict[GaussianLERFFieldHeadNames, Tensor]:
+    def get_outputs(self, positions, clip_scales) -> Dict[GaussianFieldHeadNames, Tensor]:
         # random scales, one scale
         positions = self.spatial_distortion(positions)
         positions = (positions + 2.0) / 4.0
@@ -179,20 +172,20 @@ class GaussianLERFField(Field):
         xs = [e(positions.view(-1, 3)) for e in self.clip_encs]
         x = torch.concat(xs, dim=-1)
 
-        outputs[GaussianLERFFieldHeadNames.HASHGRID] = x.view(positions.shape[0], -1)
+        outputs[GaussianFieldHeadNames.HASHGRID] = x.view(positions.shape[0], -1)
         
         clip_pass = self.clip_net(torch.cat([x, clip_scales.view(-1, 1)], dim=-1)).view(positions.shape[0], -1)
        
         # encoding = self.mlp_base_grid(positions.view(-1, 3))
         # clip_pass = self.clip_net(torch.cat([encoding, clip_scales.view(-1, 1)], dim=-1))
-        outputs[GaussianLERFFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
+        outputs[GaussianFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
 
         epsilon = 1e-5
         instance_pass = self.instance_net(x).view(positions.shape[0], -1)
-        outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
+        outputs[GaussianFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
         # dino_pass = self.dino_net(x).view(positions.shape[0], -1)
-        # outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass
+        # outputs[GaussianFieldHeadNames.DINO] = dino_pass
 
         return outputs
 
@@ -206,7 +199,7 @@ class GaussianLERFField(Field):
         # import pdb; pdb.set_trace()
         return encoding.to(torch.float32)
     
-    def get_outputs_from_feature(self, features, clip_scale, random_pixels = None) -> Dict[GaussianLERFFieldHeadNames, Tensor]:
+    def get_outputs_from_feature(self, features, clip_scale, random_pixels = None) -> Dict[GaussianFieldHeadNames, Tensor]:
         outputs = {}
         # import pdb; pdb.set_trace()
         
@@ -218,15 +211,21 @@ class GaussianLERFField(Field):
             clip_features = features
         clip_pass = self.clip_net(torch.cat([clip_features, clip_scale.view(-1, 1)], dim=-1))
 
-
-        # print("Max scale: ", clip_scale.max(), "Mean scale: ", clip_scale.mean(), "Min scale: ", clip_scale.min())
-        # clip_pass = self.clip_feature_net(clip_features)
-        outputs[GaussianLERFFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
+        outputs[GaussianFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
 
         epsilon = 1e-5
         instance_pass = self.instance_net(features)
-        outputs[GaussianLERFFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
+        outputs[GaussianFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
         # dino_pass = self.dino_net(clip_features).view(clip_features.shape[0], -1)
-        # outputs[GaussianLERFFieldHeadNames.DINO] = dino_pass
+        # outputs[GaussianFieldHeadNames.DINO] = dino_pass
+        return outputs
+    
+    def get_instance_outputs_from_feature(self, features) -> Dict[GaussianFieldHeadNames, Tensor]:
+        outputs = {}
+
+        epsilon = 1e-5
+        instance_pass = self.instance_net(features)
+        outputs = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
+
         return outputs

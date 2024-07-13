@@ -175,8 +175,21 @@ class Optimizer:
             # Wait for the user to set up the crops and groups.
             while getattr(self.pipeline.model, "best_scales") is None:
                 time.sleep(0.1)
-            _ = input("Model populated (enter to continue)")
-            cluster_labels = torch.tensor(self.pipeline.model.cluster(), dtype=torch.int32)
+            while True:
+                time.sleep(0.1)
+            # eps = input("Model populated (enter an espilon value e.g. 0.1 for hdbscan to continue)")
+            # if eps == "":
+            #     eps = 0.1
+            # else:
+            #     eps = float(eps)
+            # cluster_labels = torch.tensor(self.pipeline.model.cluster(eps), dtype=torch.int32)
+            # while cluster_labels is None:
+            #     eps = input("No clusters found. Try another espilon value")
+            #     if eps == "":
+            #         eps = 0.1
+            #     else:
+            #         eps = float(eps)
+            #     cluster_labels = torch.tensor(self.pipeline.model.cluster(eps), dtype=torch.int32)
 
         # labels = self.pipeline.cluster_labels.int().cuda()
         group_masks = [(cid == cluster_labels).cuda() for cid in range(cluster_labels.max().item() + 1)]
