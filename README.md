@@ -69,6 +69,7 @@ python -m pip install git+https://github.com/nerfstudio-project/gsplat.git@d01e6
 pip install ur_rtde==1.4.2
 pip install cowsay
 pip install opt-einsum
+pip install pyvista
 cd ~/sms/sms/ur5_interface/ur5_interface/ur5py
 pip install -e .
 cd ~/sms/sms/ur5_interface/ur5_interface/RAFT_Stereo

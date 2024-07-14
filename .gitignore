@@ -24,3 +24,7 @@ sms/data/utils/__pycache__/*
 sms/encoders/__pycache__/*
 
 sms/scripts/outputs/*
+
+sms/ur5_interface/ur5_interface/data/*
+sms/ur5_interface/ur5_interface/scripts/outputs/*
+outputs/*

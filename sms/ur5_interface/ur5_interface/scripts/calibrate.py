@@ -14,8 +14,9 @@ import pdb
 import os
 import pathlib
 
-script_directory = pathlib.Path(__file__).parent.resolve()
-calibration_save_path = str(script_directory) + '/../calibration_outputs'
+# script_directory = pathlib.Path(__file__).parent.resolve()
+# calibration_save_path = str(script_directory) + '/../calibration_outputs'
+calibration_save_path = "/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs"
 if not os.path.exists(calibration_save_path):
     os.makedirs(calibration_save_path)
 

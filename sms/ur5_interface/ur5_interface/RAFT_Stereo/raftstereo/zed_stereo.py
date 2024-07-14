@@ -1,12 +1,14 @@
 import pyzed.sl as sl
 import numpy as np
-from autolab_core import CameraIntrinsics
+from autolab_core import CameraIntrinsics, PointCloud, RgbCloud
 from raftstereo.raft_stereo import *
-
-
+from raftstereo.utils.utils import InputPadder
+import argparse
 class Zed:
     def __init__(self, recording_file=None, start_time=0.0):
         init = sl.InitParameters()
+        self.height_ = None
+        self.width_ = None
         if recording_file is not None:
             init.set_from_svo_file(recording_file)
             # disable depth
@@ -17,6 +19,8 @@ class Zed:
             init.camera_fps = 30
         else:
             init.camera_resolution = sl.RESOLUTION.HD720  # sl.RESOLUTION.HD1080
+            self.height_ = 720
+            self.width_ = 1280
             init.sdk_verbose = 1
             init.camera_fps = 30
             # flip camera
@@ -24,10 +28,11 @@ class Zed:
             init.depth_mode = sl.DEPTH_MODE.NONE
             init.depth_minimum_distance = 100  # millimeters
         self.cam = sl.Camera()
-        # manually sets exposure
-        self.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 11)
         init.camera_disable_self_calib = True
         status = self.cam.open(init)
+        # manually sets exposure
+        self.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 30)
+        self.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 60)
         self.recording_file = recording_file
         self.start_time = start_time
         if recording_file is not None:
@@ -38,14 +43,59 @@ class Zed:
             exit()
         else:
             print("Opened camera")
-            print(
-                "Current Exposure is set to: ",
+            print("Current Exposure is set to: ",
                 self.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
             )
-        self.model = create_raft()
+            print("Current Gain is set to: ",
+                self.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+            )
         left_cx = self.get_K(cam="left")[0, 2]
         right_cx = self.get_K(cam="right")[0, 2]
         self.cx_diff = right_cx - left_cx  # /1920
+        self.f_ = self.get_K(cam="left")[0,0]
+        self.cx_ = left_cx
+        self.cy_ = self.get_K(cam="left")[1,2]
+        self.Tx_ = self.get_stereo_transform()[0,3]
+        self.valid_iters_ = 32
+        self.padder_ = InputPadder(torch.empty(1,3,self.height_,self.width_).shape,divis_by=32)
+        self.model_ = create_raft()
+        # cam.self.get_stereo_transform()[0,3]
+
+    def load_image_raft(self,im):
+        img = torch.from_numpy(im).permute(2,0,1).float()
+        return img[None].to('cuda')
+    
+    def get_depth_image_and_pointcloud(self,left_img,right_img,from_frame):
+        with torch.no_grad():
+            image1 = self.load_image_raft(left_img)
+            image2 = self.load_image_raft(right_img)
+            image1, image2 = self.padder_.pad(image1, image2)
+            _, flow_up = self.model_(image1, image2, iters=self.valid_iters_, test_mode=True)
+            flow_up = self.padder_.unpad(flow_up).squeeze()
+
+            flow_up_np = -flow_up.detach().cpu().numpy().squeeze()
+            
+            depth_image = (self.f_ * self.Tx_) / abs(flow_up_np + self.cx_diff)  
+            rows, cols = depth_image.shape
+            y, x = np.meshgrid(range(rows), range(cols), indexing="ij")
+
+            # Convert needle depth image to x,y,z pointcloud
+            Z = depth_image
+            X = (x - self.cx_) * Z / self.f_
+            Y = (y - self.cy_) * Z / self.f_
+            points = np.stack((X,Y,Z),axis=-1)
+            rgbs = left_img
+            
+            # Remove all 0's
+            non_zero_indices = np.all(points != [0, 0, 0], axis=-1)
+            points = points[non_zero_indices]
+            rgbs = rgbs[non_zero_indices]
+            
+            points = points.reshape(-1,3)
+            rgbs = rgbs.reshape(-1,3)
+            points = PointCloud(points.T,from_frame)
+            rgbs = RgbCloud(rgbs.T,from_frame)
+            return depth_image,points,rgbs 
 
     def get_frame(self, depth=True, cam="left"):
         res = sl.Resolution()
@@ -147,6 +197,13 @@ class Zed:
         """
         left, right, depth = self.get_frame(cam=cam)
         return left.cpu().numpy(), right.cpu().numpy(), depth.cpu().numpy()
+    
+    def get_rgb(self, cam="left"):
+        """
+        added function to meet current API, should be refactored
+        """
+        left, right,_ = self.get_frame(depth=False,cam=cam)
+        return left.cpu().numpy(), right.cpu().numpy()
 
     def get_ns_intrinsics(self):
         calib = (
@@ -204,7 +261,8 @@ class Zed:
                 init.depth_minimum_distance = 100  # millimeters
             self.cam = sl.Camera()
             # manually sets exposure
-            self.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 11)
+            self.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 30)
+            self.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 60)
             init.camera_disable_self_calib = True
             status = self.cam.open(init)
             if self.recording_file is not None:

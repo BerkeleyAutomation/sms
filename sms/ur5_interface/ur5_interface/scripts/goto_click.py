@@ -35,8 +35,9 @@ from ur5py import UR5Robot
 from raftstereo.zed_stereo import Zed
 import pathlib
 
-script_directory = pathlib.Path(__file__).parent.resolve()
-wrist_to_cam_path = str(script_directory) + '/../calibration_outputs/wrist_to_cam.tf'
+# script_directory = pathlib.Path(__file__).parent.resolve()
+# wrist_to_cam_path = str(script_directory) + '/../calibration_outputs/wrist_to_cam.tf'
+wrist_to_cam_path = '/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf'
 
 def click_event(event, u, v, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -73,7 +74,7 @@ def click_event(event, u, v, flags, param):
 
 def main():
     robot = UR5Robot(gripper=1)
-
+    robot.gripper.close()
     home_joints = None
     # robot.move_joint(home_joints)
     # accounts for the length of the tool
