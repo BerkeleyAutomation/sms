@@ -164,9 +164,9 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """Whether to randomize the background color."""
     num_downscales: int = 2
     """at the beginning, resolution is 1/2^d, where d is this number"""
-    cull_alpha_thresh: float = 0.1
+    cull_alpha_thresh: float = 0.11
     """threshold of opacity for culling gaussians. One can set it to a lower value (e.g. 0.005) for higher quality."""
-    cull_scale_thresh: float = 0.5
+    cull_scale_thresh: float = 0.4
     """threshold of scale for culling huge gaussians"""
     cull_screen_size: float = 0.15
     """if a gaussian is more than this percent of screen space, cull it"""
@@ -174,7 +174,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """If True, continue to cull gaussians post refinement"""
     reset_alpha_every: int = 60
     """Every this many refinement steps, reset the alpha"""
-    densify_grad_thresh: float = 0.0008
+    densify_grad_thresh: float = 0.002
     """threshold of positional gradient norm for densifying gaussians"""
     densify_size_thresh: float = 0.01
     """below this size, gaussians are *duplicated*, otherwise split"""
