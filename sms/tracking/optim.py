@@ -172,7 +172,11 @@ class Optimizer:
         cluster_labels = None
         try:
             # self.pipeline.load_state()
-            cluster_labels = torch.Tensor(self.pipeline.model.cluster())
+            if getattr(self.pipeline.model, "best_scales") is None:
+                raise TypeError
+            _ = input("Model populated (interactively crop and press enter to continue)")
+            self.keep_inds = self.pipeline.keep_inds
+            cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
         except TypeError:
             print("Model not populated yet. Please wait...")
             # Wait for the user to set up the crops and groups.

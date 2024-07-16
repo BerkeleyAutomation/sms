@@ -182,7 +182,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """number of samples to split gaussians into"""
     sh_degree_interval: int = 1000
     """every n intervals turn on another sh degree"""
-    split_screen_size: float = 0.05
+    split_screen_size: float = 0.025
     """if a gaussian is more than this percent of screen space, split it"""
     stop_screen_size_at: int = 4000
     """stop culling/splitting at this step WRT screen size of gaussians"""
@@ -202,7 +202,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """maximum degree of spherical harmonics to use"""
     clip_loss_weight: float = 0.1
     """weight of clip loss"""
-    use_scale_regularization: bool = True
+    use_scale_regularization: bool = False
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
     max_gauss_ratio: float = 5.0
     """threshold of ratio of gaussian max to min scale before applying regularization
@@ -360,6 +360,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.temp_opacities = None
         self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
+        self.cluster_eps = ViewerSlider("Cluster Eps", 0.1, 0.01, 1.0, 0.01)
 
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         super().load_state_dict(dict, **kwargs)
@@ -1395,7 +1396,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         self.cluster_scene.set_disabled(True)  # Disable user from clustering, while clustering
 
-        labels = self.cluster()
+        labels = self.cluster(self.cluster_eps.value)
 
         opacities = self.gauss_params['opacities'].detach()
         opacities[labels < 0] = -100  # hide unclustered gaussians
@@ -1422,7 +1423,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         hash_encoding = hash_encoding.view(-1, 4, hash_encoding.shape[1])
         hash_encoding = (hash_encoding * weights.unsqueeze(-1))
         hash_encoding = hash_encoding.sum(dim=1)
-        group_feats = self.gaussian_field.get_outputs_from_feature(hash_encoding, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.INSTANCE].to(dtype=torch.float32).cpu().detach().numpy()
+        group_feats = self.gaussian_field.get_instance_outputs_from_feature(hash_encoding).to(dtype=torch.float32).cpu().detach().numpy()
         positions = positions.cpu().numpy()
 
         start = time.time()
@@ -1458,7 +1459,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         # Run cuml-based HDBSCAN
         clusterer = HDBSCAN(
             cluster_selection_epsilon=eps,
-            min_samples=30,
+            min_samples=25,
             min_cluster_size=30,
             allow_single_cluster=True,
         ).fit(group_feats_downsampled)
