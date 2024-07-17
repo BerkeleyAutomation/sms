@@ -56,14 +56,21 @@ class Zed():
         else:
             print("Opened camera")
 
+        left_cx = self.get_K(cam="left")[0, 2]
+        right_cx = self.get_K(cam="right")[0, 2]
+        self.cx_diff = right_cx - left_cx  # /1920
+        self.f_ = self.get_K(cam="left")[0,0]
+        self.cx_ = left_cx
+        self.cy_ = self.get_K(cam="left")[1,2]
+        
         # Create lock for raft -- gpu threading messes up CUDA memory state, with curobo...
         self.raft_lock = Lock()
         with self.raft_lock:
             self.model = create_raft()
 
-        left_cx = self.get_K(cam='left')[0,2]
-        right_cx = self.get_K(cam='right')[0,2]
-        self.cx_diff = (right_cx-left_cx)
+        # left_cx = self.get_K(cam='left')[0,2]
+        # right_cx = self.get_K(cam='right')[0,2]
+        # self.cx_diff = (right_cx-left_cx)
 
         # For visualiation.
         zed_path = Path(__file__).parent / Path("data/ZEDM.stl")

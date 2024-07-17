@@ -101,7 +101,7 @@ class RigidGroupOptimizer:
                 vtf.SO3.identity(), (gp_centroid - self.init_means.mean(dim=0)).cpu().numpy()
             ).as_matrix()).float().cuda()
 
-    def initialize_obj_pose(self, niter=100, n_seeds=6, render=False):
+    def initialize_obj_pose(self, niter=85, n_seeds=6, render=False):
         renders = []
         assert not self.is_initialized, "Can only initialize once"
 
@@ -168,12 +168,12 @@ class RigidGroupOptimizer:
             quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
             whole_pose_adj[:, :3] = point - obj_centroid
             whole_pose_adj[:, 3:] = quat
-            dig_outputs, loss, final_pose = try_opt(whole_pose_adj, niter, False) # OOM
+            dig_outputs, loss, final_pose = try_opt(whole_pose_adj, niter, False)
             if loss is not None and loss < best_loss:
                 best_loss = loss
                 best_outputs = dig_outputs
                 best_pose = final_pose
-        _, _, best_pose = try_opt(best_pose, 100, True)# do a few optimization steps with depth
+        _, _, best_pose = try_opt(best_pose, 85, True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_pose,
@@ -236,6 +236,21 @@ class RigidGroupOptimizer:
         part2part = self.keyframes[keyframe]
         return self.get_registered_o2w.matmul(self.init_p2o[i]).matmul(part2part[i])
     
+    def get_part2world_transform(self,i):
+        """
+        returns the transform from part_i to world
+        """
+        R_delta = torch.from_numpy(vtf.SO3(self.part_deltas[i, 3:].cpu().numpy()).as_matrix()).float().cuda()
+        # we premultiply by rotation matrix to line up the 
+        initial_part2world = self.get_initial_part2world(i)
+        part2world = initial_part2world.clone()
+        part2world[:3,:3] = R_delta[:3,:3].matmul(part2world[:3,:3])# rotate around world frame
+        part2world[:3,3] += self.part_deltas[i,:3]# translate in world frame
+        return part2world
+    
+    def get_initial_part2world(self,i):
+        return self.init_o2w.matmul(self.objreg2objinit).matmul(self.init_p2o[i])
+    
     def get_registered_o2w(self):
         return self.init_o2w.matmul(self.objreg2objinit)
     
@@ -245,7 +260,7 @@ class RigidGroupOptimizer:
         """
         with self.render_lock:
             self.sms_model.eval()
-            print("apply_to_model")
+            # print("apply_to_model")
             self.apply_to_model(
                 obj_delta, part_deltas, self.group_labels
             )
@@ -360,6 +375,7 @@ class RigidGroupOptimizer:
                 # start_time = time.time()
                 full_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
                 # print("Get output time: ", time.time()-start_time)
+        # import pdb; pdb.set_trace()
         return {k:i.detach() for k,i in full_outputs.items()}
 
     def apply_to_model(self, objdelta, part_deltas, group_labels):

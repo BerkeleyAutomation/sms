@@ -10,7 +10,17 @@ from sms.tracking.zed import Zed
 from sms.tracking.optim import Optimizer
 from nerfstudio.cameras.cameras import Cameras
 import warp as wp
+from ur5py.ur5 import UR5Robot
 
+WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
+
+def clear_tcp(robot):
+    tool_to_wrist = RigidTransform()
+    tool_to_wrist.translation = np.array([0, 0, 0])
+    tool_to_wrist.from_frame = "tool"
+    tool_to_wrist.to_frame = "wrist"
+    robot.set_tcp(tool_to_wrist)
+    
 def main(
     config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/block_tape_screwdriver/sms-data/2024-07-16_220503/config.yml"),
 ):
@@ -25,9 +35,34 @@ def main(
     opt_init_handle = server.add_gui_button("Set initial frame", disabled=True)
     # try:
     zed = Zed()
+    zed_mini_focal_length = 730
+    if(abs(zed.f_ - zed_mini_focal_length) > 10):
+        print("Accidentally connected to wrong Zed. Trying again")
+        zed = Zed()
+        if(abs(zed.f_ - zed_mini_focal_length) > 10):
+            print("Make sure just Zed mini is plugged in")
+            exit()
 
+    robot = UR5Robot(gripper=1)
+    clear_tcp(robot)
+    
+    home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
+    robot.move_joint(home_joints,vel=1.0,acc=0.1)
+    world_to_wrist = robot.get_pose()
+    world_to_wrist.from_frame = "wrist"
+    world_to_cam = world_to_wrist * WRIST_TO_CAM
+    proper_world_to_cam_translation = world_to_cam.translation
+    proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
+    proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=proper_world_to_cam_translation,from_frame='cam',to_frame='world')
+    proper_world_to_wrist = proper_world_to_cam * WRIST_TO_CAM.inverse()
+    
+    import pdb; pdb.set_trace()
+    
+    robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
+    
     # Visualize the camera.
-    camera_tf = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_final_mini.tf")
+    camera_tf = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_ZM.tf")
+    
     camera_frame = server.add_frame(
         "camera",
         position=camera_tf.translation,  # rough alignment.
@@ -43,16 +78,16 @@ def main(
         position=zed.cam_to_zed.translation,
         wxyz=zed.cam_to_zed.quaternion,
     )
-    zed_intr = zed.get_K()
-    ns_camera = Cameras(fx=zed_intr[0][0],
-                        fy=zed_intr[1][1],
-                        cx=zed_intr[0][2],
-                        cy=zed_intr[1][2],
-                        width=zed.width,
-                        height=zed.height,
-                        camera_to_worlds=torch.from_numpy(camera_tf.matrix[:3,:4]).unsqueeze(0).float())
+    # zed_intr = zed.get_K()
+    # ns_camera = Cameras(fx=zed_intr[0][0],
+    #                     fy=zed_intr[1][1],
+    #                     cx=zed_intr[0][2],
+    #                     cy=zed_intr[1][2],
+    #                     width=zed.width,
+    #                     height=zed.height,
+    #                     camera_to_worlds=torch.from_numpy(camera_tf.matrix[:3,:4]).unsqueeze(0).float())
     l, _, depth = zed.get_frame(depth=True)  # type: ignore
-
+    # import pdb; pdb.set_trace()
     toad_opt = Optimizer(
         config_path,
         zed.get_K(),
@@ -66,6 +101,7 @@ def main(
             ).as_matrix()[None, :3, :]
         ).float(),
     )
+    # import pdb; pdb.set_trace()
     
 
     @opt_init_handle.on_click
@@ -73,7 +109,7 @@ def main(
         assert (zed is not None) and (toad_opt is not None)
         opt_init_handle.disabled = True
         l, _, depth = zed.get_frame(depth=True)
-        toad_opt.set_frame(l,ns_camera,depth)
+        toad_opt.set_frame(l,toad_opt.cam2world_ns,depth)
         with zed.raft_lock:
             toad_opt.init_obj_pose()
         # then have the zed_optimizer be allowed to run the optimizer steps.
@@ -87,13 +123,15 @@ def main(
 
     while True:
         if zed is not None:
+            start_time = time.time()
             left, right, depth = zed.get_frame()
-            print("Got frame")
+            print("Got frame in ", time.time()-start_time)
+            start_time2 = time.time()
             assert isinstance(toad_opt, Optimizer)
             if toad_opt.initialized:
-                toad_opt.set_frame(left,ns_camera,depth)
+                toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
                 with zed.raft_lock:
-                    toad_opt.step_opt(niter=50)
+                    toad_opt.step_opt(niter=5)
 
                 tf_list = toad_opt.get_parts2cam()
                 print(tf_list)
@@ -131,6 +169,7 @@ def main(
                 colors=colors,
                 point_size=0.001,
             )
+            print("Opt in ", time.time()-start_time2)
 
         else:
             time.sleep(1)

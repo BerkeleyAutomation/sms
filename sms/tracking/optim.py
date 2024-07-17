@@ -215,7 +215,7 @@ class Optimizer:
         Also updates `initialized` to `True`."""
         # retval only matters for visualization
         start = time.time()
-        xs, ys, outputs, renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=9)
+        xs, ys, outputs, renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=7)
         print(f"Time taken for init (pose opt): {time.time() - start:.2f} s")
 
         start = time.time()
