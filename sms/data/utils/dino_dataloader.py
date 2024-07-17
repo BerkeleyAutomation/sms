@@ -96,7 +96,7 @@ class DinoDataloader(FeatureDataloader):
     dino_layer = 11
     dino_facet = "key"
     dino_bin = False
-
+    dino_load_size = 714
     def __init__(
         self,
         cfg: dict,
@@ -241,7 +241,9 @@ class DinoDataloader(FeatureDataloader):
         C, H, W = image.shape
         extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
         # print(self.dino_load_size)
-        preproc_image = extractor.preprocess(image)[0].to(self.device)
+        preproc_image = extractor.preprocess(image, self.dino_load_size)[0].to(self.device)
+        # print(preproc_image.shape)
+        preproc_image = preproc_image[:,:,0:1260] # HARDCODED RESOLUTION RESIZE THIS IS BAD
         # start = time.time()
         with torch.no_grad():
             descriptors = extractor.extract_descriptors(
@@ -255,4 +257,4 @@ class DinoDataloader(FeatureDataloader):
         # print(f"DinoEmbeddingProcess took {time.time()-start} seconds")
         # dino_embeds.append(descriptors.cpu().detach())
         # self.data = torch.stack(dino_embeds, dim=0)
-        return descriptors.cpu().detach()
+        return descriptors

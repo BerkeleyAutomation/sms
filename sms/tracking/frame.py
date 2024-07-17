@@ -46,7 +46,7 @@ class Frame:
                         ).squeeze().unsqueeze(-1)
 
         self.dino_feats = dino_fn(
-            rgb.permute(2, 0, 1)
+            rgb.permute(2, 0, 1).unsqueeze(0)
         ).squeeze()
         self.dino_feats = resize(
             self.dino_feats.permute(2, 0, 1),

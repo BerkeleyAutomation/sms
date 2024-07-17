@@ -810,7 +810,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
         return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
 
-    def get_outputs(self, camera: Cameras) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_outputs(self, camera: Cameras, tracking=False) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -918,7 +918,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
             sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
         else:
             sh_degree_to_use = None
-
         render, alpha, info = rasterization(
             means=means_crop,
             quats=quats_crop / quats_crop.norm(dim=-1, keepdim=True),
@@ -959,7 +958,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         outputs["accumulation"] = alpha.squeeze(0)
         outputs["background"] = background
 
-        if self.datamanager.use_clip or self.loaded_ckpt:
+        if self.datamanager.use_clip or self.loaded_ckpt and not tracking:
             if (self.step - self.datamanager.lerf_step > 500):
                 if camera.metadata is not None:
                     if "clip_downscale_factor" not in camera.metadata:
@@ -1029,7 +1028,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     outputs["instance"] = field_output[GaussianFieldHeadNames.INSTANCE].to(dtype=torch.float32)
 
 
-                if not self.training:
+                if not self.training and not tracking:
                     # N x B x 1; N
                     max_across, self.best_scales,instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
                     #, instances_out

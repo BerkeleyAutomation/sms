@@ -9,7 +9,7 @@ from autolab_core import RigidTransform
 from sms.tracking.zed import Zed
 from sms.tracking.optim import Optimizer
 from nerfstudio.cameras.cameras import Cameras
-
+import warp as wp
 
 def main(
     config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/block_tape_screwdriver/sms-data/2024-07-16_220503/config.yml"),
@@ -20,7 +20,7 @@ def main(
         config_path: Path to the nerfstudio config file.
     """
     server = viser.ViserServer()
-
+    wp.init()
     # Set up the camera.
     opt_init_handle = server.add_gui_button("Set initial frame", disabled=True)
     # try:
@@ -43,7 +43,6 @@ def main(
         position=zed.cam_to_zed.translation,
         wxyz=zed.cam_to_zed.quaternion,
     )
-    # import pdb; pdb.set_trace()
     zed_intr = zed.get_K()
     ns_camera = Cameras(fx=zed_intr[0][0],
                         fy=zed_intr[1][1],
@@ -51,8 +50,7 @@ def main(
                         cy=zed_intr[1][2],
                         width=zed.width,
                         height=zed.height,
-                        camera_to_worlds=torch.from_numpy(camera_tf.matrix[:3,:4]).unsqueeze(0))
-
+                        camera_to_worlds=torch.from_numpy(camera_tf.matrix[:3,:4]).unsqueeze(0).float())
     l, _, depth = zed.get_frame(depth=True)  # type: ignore
 
     toad_opt = Optimizer(

@@ -20,6 +20,7 @@ from typing import Tuple
 from nerfstudio.model_components.losses import depth_ranking_loss
 from sms.tracking.utils2 import *
 from sms.tracking.frame import Frame
+import time
 
 class RigidGroupOptimizer:
     use_depth: bool = True
@@ -100,7 +101,7 @@ class RigidGroupOptimizer:
                 vtf.SO3.identity(), (gp_centroid - self.init_means.mean(dim=0)).cpu().numpy()
             ).as_matrix()).float().cuda()
 
-    def initialize_obj_pose(self, niter=200, n_seeds=6, render=False):
+    def initialize_obj_pose(self, niter=100, n_seeds=6, render=False):
         renders = []
         assert not self.is_initialized, "Can only initialize once"
 
@@ -120,7 +121,10 @@ class RigidGroupOptimizer:
                 optimizer.step()
                 if render:
                     with torch.no_grad():
-                        dig_outputs = self.sms_model.get_outputs(self.frame.camera)
+                        # print("Getting output")
+                        # start_time = time.time()
+                        dig_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
+                        # print("Get output time: ", time.time()-start_time)
                     renders.append(dig_outputs["rgb"].detach())
             self.is_initialized = True
             return dig_outputs, loss, whole_pose_adj.data.detach()
@@ -164,12 +168,12 @@ class RigidGroupOptimizer:
             quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
             whole_pose_adj[:, :3] = point - obj_centroid
             whole_pose_adj[:, 3:] = quat
-            dig_outputs, loss, final_pose = try_opt(whole_pose_adj, niter, False)
+            dig_outputs, loss, final_pose = try_opt(whole_pose_adj, niter, False) # OOM
             if loss is not None and loss < best_loss:
                 best_loss = loss
                 best_outputs = dig_outputs
                 best_pose = final_pose
-        _, _, best_pose = try_opt(best_pose, 200, True)# do a few optimization steps with depth
+        _, _, best_pose = try_opt(best_pose, 100, True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_pose,
@@ -241,10 +245,14 @@ class RigidGroupOptimizer:
         """
         with self.render_lock:
             self.sms_model.eval()
+            print("apply_to_model")
             self.apply_to_model(
                 obj_delta, part_deltas, self.group_labels
             )
-            dig_outputs = self.sms_model.get_outputs(frame.camera)
+            # print("Getting output")
+            # start_time = time.time()
+            dig_outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
+            # print("Get output time: ", time.time()-start_time)
         if "dino" not in dig_outputs:
             self.reset_transforms()
             raise RuntimeError("Lost tracking")
@@ -348,7 +356,10 @@ class RigidGroupOptimizer:
                 self.apply_to_model(
                         self.obj_delta, self.part_deltas, self.group_labels
                     )
-                full_outputs = self.sms_model.get_outputs(self.frame.camera)
+                # print("Getting output")
+                # start_time = time.time()
+                full_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
+                # print("Get output time: ", time.time()-start_time)
         return {k:i.detach() for k,i in full_outputs.items()}
 
     def apply_to_model(self, objdelta, part_deltas, group_labels):

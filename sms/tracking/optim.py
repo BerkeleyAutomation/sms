@@ -23,7 +23,8 @@ from nerfstudio.models.splatfacto import SH2RGB
 from sms.tracking.rigid_group_optimizer import RigidGroupOptimizer
 from sms.tracking.toad_object import ToadObject
 from sms.tracking.frame import Frame
-from sms.data.utils.dino_dataloader import DinoDataloader
+from sms.data.utils.dino_dataloader2 import DinoDataloader
+import os.path as osp
 
 class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
@@ -86,12 +87,14 @@ class Optimizer:
         self.num_groups = len(group_masks)
         
         # Init DINO dataloader for extractor fn
+        cache_dir = config_path.parent.parent.parent
+        dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
         
         self.dino_dataloader = DinoDataloader(
             image_list = None,
             device = 'cuda',
-            cfg={},
-            cache_path=None,
+            cfg={"image_shape": [719, 1279]}, #HARDCODED BAD
+            cache_path=dino_cache_path,
             use_denoiser=False,
         )
 
@@ -199,12 +202,12 @@ class Optimizer:
 
         _, cluster_labels = torch.unique(cluster_labels, return_inverse=True)
         group_masks = [(cid == cluster_labels).cuda() for cid in range(cluster_labels.max().item() + 1)]
-        return cluster_labels, group_masks
+        return cluster_labels.int().cuda(), group_masks
 
     def set_frame(self, rgb, ns_camera, depth) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
-        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.generate_dino_embed, metric_depth_img=depth)
+        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
         self.optimizer.set_frame(frame)
 
     def init_obj_pose(self):
@@ -212,7 +215,7 @@ class Optimizer:
         Also updates `initialized` to `True`."""
         # retval only matters for visualization
         start = time.time()
-        xs, ys, outputs, renders = self.optimizer.initialize_obj_pose(render=True,metric_depth=True,n_seeds=9)
+        xs, ys, outputs, renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=9)
         print(f"Time taken for init (pose opt): {time.time() - start:.2f} s")
 
         start = time.time()
@@ -228,7 +231,7 @@ class Optimizer:
     def step_opt(self,niter):
         """Run the optimizer for `niter` iterations."""
         assert self.initialized, "Please initialize the object pose first."
-        self.optimizer.step(niter=niter,metric_depth=True)
+        self.optimizer.step(niter=niter)
 
     def get_pointcloud(self) -> trimesh.PointCloud:
         """Get the pointcloud of the object parts in camera frame."""

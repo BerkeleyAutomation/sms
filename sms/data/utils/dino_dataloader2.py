@@ -216,7 +216,7 @@ class DinoDataloader(FeatureDataloader):
                 
         return torch.stack(dino_embeds, dim=0)
     
-    def get_pca_feats(self,image_list, keep_cuda = False):
+    def get_pca_feats(self,image_list, keep_cuda = True):
         feats = self.get_dino_feats(image_list, keep_cuda=keep_cuda)
         data_shape = feats.shape
         pca_feats = torch.matmul(feats.view(-1, data_shape[-1]), self.pca_matrix.to(feats)).reshape((*data_shape[:-1], self.pca_dim))
