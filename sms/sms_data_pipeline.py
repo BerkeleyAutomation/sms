@@ -434,6 +434,7 @@ class smsdataPipeline(VanillaPipeline):
             
             vote = int(torch.tensor(self.model.cluster_labels[sphere_inds].mode())[0].item())
             keep_list = [torch.where(self.model.cluster_labels == vote)[0]]
+            
 
         # Remove the click handle + visualization
         self.click_location = None

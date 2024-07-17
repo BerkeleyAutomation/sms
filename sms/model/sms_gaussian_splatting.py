@@ -1461,7 +1461,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             cluster_selection_epsilon=eps,
             min_samples=25,
             min_cluster_size=30,
-            allow_single_cluster=True,
+            allow_single_cluster=False,
         ).fit(group_feats_downsampled)
 
         non_clustered = np.ones(positions.shape[0], dtype=bool)

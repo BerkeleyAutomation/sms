@@ -34,7 +34,7 @@ class Zed():
             init.sdk_verbose = 1
             init.camera_fps = 30
         else:
-            init.camera_resolution = sl.RESOLUTION.HD1080
+            init.camera_resolution = sl.RESOLUTION.HD720
             init.sdk_verbose = 1
             init.camera_fps = 30
             # flip camera
@@ -66,7 +66,7 @@ class Zed():
         self.cx_diff = (right_cx-left_cx)
 
         # For visualiation.
-        zed_path = Path(__file__).parent / ".." / Path("data/ZED2.stl")
+        zed_path = Path(__file__).parent / Path("data/ZEDM.stl")
         zed_mesh = trimesh.load(str(zed_path))
         assert isinstance(zed_mesh, trimesh.Trimesh)
         self.zed_mesh = zed_mesh

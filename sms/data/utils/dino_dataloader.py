@@ -2,7 +2,7 @@ import typing
 
 import torch
 from sms.data.utils.dino_extractor import ViTExtractor
-from sms.data.utils.feature_dataloader2 import FeatureDataloader
+from sms.data.utils.feature_dataloader import FeatureDataloader
 from tqdm import tqdm
 from torchvision import transforms
 from typing import Tuple
@@ -106,7 +106,7 @@ class DinoDataloader(FeatureDataloader):
         pca_dim: int = 64,
         use_denoiser: bool = True,
     ):
-        assert "image_shape" in cfg
+        # assert "image_shape" in cfg
         self.extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
         self.use_denoiser = use_denoiser
         self.device = device
@@ -145,8 +145,8 @@ class DinoDataloader(FeatureDataloader):
             self.denoise_model.eval()
             self.denoise_model.to(device)
         self.pca_dim = pca_dim
-        super().__init__(cfg, device, image_list, cache_path)
-        print("Dino data shape", self.data.shape)
+        # super().__init__(cfg, device, image_list, cache_path)
+        # print("Dino data shape", self.data.shape)
         
         
            
@@ -240,8 +240,8 @@ class DinoDataloader(FeatureDataloader):
     def generate_dino_embed(self, image):
         C, H, W = image.shape
         extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
-        print(self.dino_load_size)
-        preproc_image = extractor.preprocess(image, self.dino_load_size)[0].to(self.device)
+        # print(self.dino_load_size)
+        preproc_image = extractor.preprocess(image)[0].to(self.device)
         # start = time.time()
         with torch.no_grad():
             descriptors = extractor.extract_descriptors(
@@ -250,9 +250,9 @@ class DinoDataloader(FeatureDataloader):
                 self.dino_facet,
                 self.dino_bin,
             )
-        dino_embeds = []
+        # dino_embeds = []
         descriptors = descriptors.reshape(extractor.num_patches[0], extractor.num_patches[1], -1)
         # print(f"DinoEmbeddingProcess took {time.time()-start} seconds")
-        dino_embeds.append(descriptors.cpu().detach())
-        self.data = torch.stack(dino_embeds, dim=0)
+        # dino_embeds.append(descriptors.cpu().detach())
+        # self.data = torch.stack(dino_embeds, dim=0)
         return descriptors.cpu().detach()

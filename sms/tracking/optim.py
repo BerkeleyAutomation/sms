@@ -21,8 +21,9 @@ from nerfstudio.utils import writer
 from nerfstudio.models.splatfacto import SH2RGB
 
 from sms.tracking.rigid_group_optimizer import RigidGroupOptimizer
-# from toad.toad_object import GraspableToadObject
-
+from sms.tracking.toad_object import ToadObject
+from sms.tracking.frame import Frame
+from sms.data.utils.dino_dataloader import DinoDataloader
 
 class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
@@ -38,7 +39,7 @@ class Optimizer:
     num_groups: int
     """Number of object parts."""
 
-    # toad_object: GraspableToadObject
+    toad_object: ToadObject
     """Meshes + grasps for object parts."""
 
     optimizer: RigidGroupOptimizer
@@ -52,10 +53,10 @@ class Optimizer:
     def __init__(
         self,
         config_path: Path,  # path to the nerfstudio config file
-        # K: np.ndarray,  # camera intrinsics
-        # width: int,  # camera width
-        # height: int,  # camera height
-        # init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
+        K: np.ndarray,  # camera intrinsics
+        width: int,  # camera width
+        height: int,  # camera height
+        init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
     ):
         # Load the smsdataPipeline.
         train_config, self.pipeline, _, _ = eval_setup(config_path)
@@ -83,6 +84,16 @@ class Optimizer:
         group_labels, group_masks = self._setup_crops_and_groups()
 
         self.num_groups = len(group_masks)
+        
+        # Init DINO dataloader for extractor fn
+        
+        self.dino_dataloader = DinoDataloader(
+            image_list = None,
+            device = 'cuda',
+            cfg={},
+            cache_path=None,
+            use_denoiser=False,
+        )
 
         # Initialize camera -- in world coordinates.
         # assert init_cam_pose is None
@@ -92,7 +103,7 @@ class Optimizer:
         # H = H[:3, :]
         # init_cam_pose = torch.tensor(H).float().reshape(1, 3, 4)
 
-        '''
+        
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)
 
@@ -120,9 +131,9 @@ class Optimizer:
         cam2world_ns.rescale_output_resolution(
             self.MATCH_RESOLUTION / max(width, height)
         )
-        '''
+        
         # Set up the optimizer.
-        # self.cam2world_ns = cam2world_ns
+        self.cam2world_ns = cam2world_ns
         self.group_masks, self.group_labels = group_masks, group_labels
         self.dataset_scale = dataset_scale
 
@@ -141,13 +152,13 @@ class Optimizer:
 
         # Initialize the object -- remember that ToadObject works in world scale,
         # since grasps + etc are in world scale.
-        # start = time.time()
-        # self.toad_object = GraspableToadObject.from_points_and_clusters(
-        #     self.optimizer.init_means.detach().cpu().numpy(),
-        #     self.optimizer.group_labels.detach().cpu().numpy(),
-        #     scene_scale=self.optimizer.dataset_scale,
-        # )
-        # print(f"Time taken for init (toad_object): {time.time() - start:.2f} s")
+        start = time.time()
+        self.toad_object = ToadObject.from_points_and_clusters(
+            self.optimizer.init_means.detach().cpu().numpy(),
+            self.optimizer.group_labels.detach().cpu().numpy(),
+            scene_scale=self.optimizer.dataset_scale,
+        )
+        print(f"Time taken for init (toad_object): {time.time() - start:.2f} s")
 
         self.initialized = False
 
@@ -190,10 +201,11 @@ class Optimizer:
         group_masks = [(cid == cluster_labels).cuda() for cid in range(cluster_labels.max().item() + 1)]
         return cluster_labels, group_masks
 
-    def set_frame(self, rgb, depth) -> None:
+    def set_frame(self, rgb, ns_camera, depth) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
-        self.optimizer.set_frame(target_frame_rgb, depth=depth)
+        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.generate_dino_embed, metric_depth_img=depth)
+        self.optimizer.set_frame(frame)
 
     def init_obj_pose(self):
         """Initialize the object pose, and render the object pose optimization process.
