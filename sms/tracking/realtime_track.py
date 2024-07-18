@@ -23,7 +23,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/cube/sms-data/2024-07-17_152152/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl/sms-data/2024-07-17_213522/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -129,9 +129,11 @@ def main(
             start_time2 = time.time()
             assert isinstance(toad_opt, Optimizer)
             if toad_opt.initialized:
+                start_time3 = time.time()
                 toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
+                print("Set frame in ", time.time()-start_time3)
                 with zed.raft_lock:
-                    outputs = toad_opt.step_opt(niter=5)
+                    outputs = toad_opt.step_opt(niter=25)
 
                 # Add ZED img and GS render to viser
                 server.add_image(
@@ -181,6 +183,7 @@ def main(
                     #     )
 
             # Visualize pointcloud.
+            start_time4 = time.time()
             K = torch.from_numpy(zed.get_K()).float().cuda()
             assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
             points, colors = Zed.project_depth(left, depth, K)
@@ -190,6 +193,7 @@ def main(
                 colors=colors,
                 point_size=0.001,
             )
+            print("Visualized pointcloud in ", time.time()-start_time4)
             print("Opt in ", time.time()-start_time2)
 
         else:

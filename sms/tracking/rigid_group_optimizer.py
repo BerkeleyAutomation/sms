@@ -21,6 +21,7 @@ from nerfstudio.model_components.losses import depth_ranking_loss
 from sms.tracking.utils2 import *
 from sms.tracking.frame import Frame
 import time
+from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 
 class RigidGroupOptimizer:
     use_depth: bool = True
@@ -105,8 +106,8 @@ class RigidGroupOptimizer:
         renders = []
         assert not self.is_initialized, "Can only initialize once"
 
-        def try_opt(start_pose_adj, niter, use_depth):
-            "tries to optimize the pose, returns None if failed, otherwise returns outputs and loss"
+        def try_opt(start_pose_adj, niter, use_depth, rndr = False):
+            "tries to optimize for the initial pose, returns loss and pose + GS render if requested"
             self.reset_transforms()
             whole_pose_adj = start_pose_adj.detach().clone()
             whole_pose_adj = torch.nn.Parameter(whole_pose_adj)
@@ -119,15 +120,13 @@ class RigidGroupOptimizer:
                 loss.backward()
                 tape.backward()
                 optimizer.step()
-                if render:
+                if rndr:
                     with torch.no_grad():
-                        # print("Getting output")
-                        # start_time = time.time()
                         dig_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
-                        # print("Get output time: ", time.time()-start_time)
                     renders.append(dig_outputs["rgb"].detach())
+                    return dig_outputs, loss, whole_pose_adj.data.detach()
             self.is_initialized = True
-            return dig_outputs, loss, whole_pose_adj.data.detach()
+            return loss, whole_pose_adj.data.detach()
 
         best_loss = float("inf")
 
@@ -168,12 +167,12 @@ class RigidGroupOptimizer:
             quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
             whole_pose_adj[:, :3] = point - obj_centroid
             whole_pose_adj[:, 3:] = quat
-            dig_outputs, loss, final_pose = try_opt(whole_pose_adj, niter, False)
+            dig_outputs, loss, final_pose = try_opt(whole_pose_adj, niter, False, render)
             if loss is not None and loss < best_loss:
                 best_loss = loss
                 best_outputs = dig_outputs
                 best_pose = final_pose
-        _, _, best_pose = try_opt(best_pose, 85, True)# do a few optimization steps with depth
+        _, best_pose = try_opt(best_pose, 85, True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_pose,
@@ -245,7 +244,7 @@ class RigidGroupOptimizer:
         initial_part2world = self.get_initial_part2world(i)
         part2world = initial_part2world.clone()
         part2world[:3,:3] = R_delta[:3,:3].matmul(part2world[:3,:3])# rotate around world frame
-        part2world[:3,3] += self.part_deltas[i,:3]# translate in world frame
+        part2world[:3,3] += self.part_deltas[i,:3] # * VISER_NERFSTUDIO_SCALE_RATIO # translate in world frame
         return part2world
     
     def get_initial_part2world(self,i):
