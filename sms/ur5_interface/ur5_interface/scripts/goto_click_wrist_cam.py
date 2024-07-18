@@ -34,6 +34,7 @@ from ur5py import UR5Robot
 
 from raftstereo.zed_stereo import Zed
 import pathlib
+from matplotlib import pyplot as plt
 
 # script_directory = pathlib.Path(__file__).parent.resolve()
 # wrist_to_zed_mini_path = str(script_directory) + '/../calibration_outputs/wrist_to_cam.tf'
@@ -73,6 +74,7 @@ def click_event(event, u, v, flags, param):
 
 
 def main():
+    debug_ = False
     robot = UR5Robot(gripper=1)
     robot.gripper.close()
     home_joints = None
@@ -130,6 +132,11 @@ def main():
         #     img = image.get_data()
 
         img, _, depth = zed.get_rgb_depth()
+        if(debug_):
+            plt.imshow(depth,cmap='jet')
+            plt.savefig('/home/lifelong/kush_raft.png')
+            import pdb
+            pdb.set_trace()
         img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
         # Create a dictionary to pass to the callback function
         params = {"img": img.copy(), "u": None, "v": None}

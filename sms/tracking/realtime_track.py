@@ -6,7 +6,8 @@ import numpy as np
 import tyro
 from pathlib import Path
 from autolab_core import RigidTransform
-from sms.tracking.zed import Zed
+# from sms.tracking.zed import Zed
+from sms.tracking.prime_tri_zed import Zed
 from sms.tracking.optim import Optimizer
 from nerfstudio.cameras.cameras import Cameras
 import warp as wp
@@ -22,7 +23,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/block_tape_screwdriver/sms-data/2024-07-16_220503/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/cube/sms-data/2024-07-17_152152/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -55,13 +56,12 @@ def main(
     proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
     proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=proper_world_to_cam_translation,from_frame='cam',to_frame='world')
     proper_world_to_wrist = proper_world_to_cam * WRIST_TO_CAM.inverse()
-    
-    import pdb; pdb.set_trace()
-    
+        
     robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
     
     # Visualize the camera.
-    camera_tf = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_ZM.tf")
+    # camera_tf = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_ZM.tf")
+    camera_tf = proper_world_to_cam
     
     camera_frame = server.add_frame(
         "camera",
@@ -87,7 +87,7 @@ def main(
     #                     height=zed.height,
     #                     camera_to_worlds=torch.from_numpy(camera_tf.matrix[:3,:4]).unsqueeze(0).float())
     l, _, depth = zed.get_frame(depth=True)  # type: ignore
-    # import pdb; pdb.set_trace()
+    
     toad_opt = Optimizer(
         config_path,
         zed.get_K(),
@@ -131,10 +131,31 @@ def main(
             if toad_opt.initialized:
                 toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
                 with zed.raft_lock:
-                    toad_opt.step_opt(niter=5)
+                    outputs = toad_opt.step_opt(niter=5)
 
+                # Add ZED img and GS render to viser
+                server.add_image(
+                    "cam/zed_left",
+                    left.cpu().detach().numpy(),
+                    render_width=left.shape[1]/2500,
+                    render_height=left.shape[0]/2500,
+                    position = (0.5, 0.5, 0.5),
+                    wxyz=(0, -0.7071068, -0.7071068, 0),
+                    visible=True
+                )
+                
+                server.add_image(
+                    "cam/gs_render",
+                    outputs["rgb"].cpu().detach().numpy(),
+                    render_width=left.shape[1]/2500,
+                    render_height=left.shape[0]/2500,
+                    position = (0.5, -0.5, 0.5),
+                    wxyz=(0, -0.7071068, -0.7071068, 0),
+                    visible=True
+                )
+                
                 tf_list = toad_opt.get_parts2cam()
-                print(tf_list)
+                # print(tf_list)
                 for idx, tf in enumerate(tf_list):
                     server.add_frame(
                         f"camera/object/group_{idx}",

@@ -231,7 +231,8 @@ class Optimizer:
     def step_opt(self,niter):
         """Run the optimizer for `niter` iterations."""
         assert self.initialized, "Please initialize the object pose first."
-        self.optimizer.step(niter=niter)
+        outputs = self.optimizer.step(niter=niter)
+        return outputs
 
     def get_pointcloud(self) -> trimesh.PointCloud:
         """Get the pointcloud of the object parts in camera frame."""

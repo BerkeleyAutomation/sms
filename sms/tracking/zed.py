@@ -9,7 +9,7 @@ import trimesh
 from pathlib import Path
 from raftstereo.raft_stereo import *
 from autolab_core import RigidTransform
-
+from matplotlib import pyplot as plt
 class Zed():
     width: int
     """Width of the rgb/depth images."""
@@ -43,6 +43,7 @@ class Zed():
             init.depth_minimum_distance = 100#millimeters
         self.init_res = 1920 if init.camera_resolution == sl.RESOLUTION.HD1080 else 1280
         print("INIT RES",self.init_res)
+        self.debug_ = False
         self.width = 1280
         self.height = 720
         self.cam = sl.Camera()
@@ -103,6 +104,11 @@ class Zed():
                     flow = raft_inference(left_torch,right_torch,self.model)
                 fx = self.get_K()[0,0]
                 depth = fx*self.get_stereo_transform()[0,3]/(flow.abs()+self.cx_diff)
+                if(self.debug_):
+                    plt.imshow(depth.detach().cpu().numpy(),cmap='jet')
+                    plt.savefig('/home/lifelong/justin_raft.png')
+                    import pdb
+                    pdb.set_trace()
             else:
                 depth = None
             return left, right, depth

@@ -149,7 +149,7 @@ def register_webcam():
     trajectory_path = pathlib.Path(calibration_save_path + "/calibrate_extrinsics_trajectory.npy")
     traj = None
     automatic_path = False
-    if trajectory_path.exists():
+    if trajectory_path.exists() and not save_joints:
         traj = np.load(trajectory_path)
         automatic_path = True
     else:
@@ -166,6 +166,7 @@ def register_webcam():
     for p in tqdm(traj):
         if not automatic_path:
             ur.start_teach()  
+            input("Enter to take picture")
         else:
             ur.move_joint(p,vel=1.0,acc=0.1)
             time.sleep(0.5)

@@ -58,7 +58,7 @@ class Zed:
         self.Tx_ = self.get_stereo_transform()[0,3]
         self.valid_iters_ = 32
         self.padder_ = InputPadder(torch.empty(1,3,self.height_,self.width_).shape,divis_by=32)
-        self.model_ = create_raft()
+        self.model = create_raft()
         # cam.self.get_stereo_transform()[0,3]
 
     def load_image_raft(self,im):
@@ -70,7 +70,7 @@ class Zed:
             image1 = self.load_image_raft(left_img)
             image2 = self.load_image_raft(right_img)
             image1, image2 = self.padder_.pad(image1, image2)
-            _, flow_up = self.model_(image1, image2, iters=self.valid_iters_, test_mode=True)
+            _, flow_up = self.model(image1, image2, iters=self.valid_iters_, test_mode=True)
             flow_up = self.padder_.unpad(flow_up).squeeze()
 
             flow_up_np = -flow_up.detach().cpu().numpy().squeeze()
