@@ -163,7 +163,7 @@ class RigidGroupOptimizer:
             return y, x, torch.tensor([y.mean().item(), x.mean().item()], device="cuda")
 
         ys, xs, best_pix = find_pixel()
-        obj_centroid = self.sms_model.means.mean(dim=0, keepdim=True)  # 1x3
+        obj_centroid = self.sms_model.means.mean(dim=0, keepdim=True)  # 1x3 # TODO: Turn this into per object centroid using self.init_p2w
         ray = self.frame.camera.generate_rays(0, best_pix)
         dist = 1.0
         point = ray.origins + ray.directions * dist

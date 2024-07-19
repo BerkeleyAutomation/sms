@@ -7,7 +7,7 @@ import plotly
 from plotly import express as px
 import trimesh
 from pathlib import Path
-from raftstereo.raft_stereo import *
+# from raftstereo.raft_stereo import *
 from autolab_core import RigidTransform
 import torch
 import torch.nn.functional as tfn

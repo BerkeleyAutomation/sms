@@ -77,7 +77,7 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """The stride scaler for patch-based training"""
     network: BaseImageEncoderConfig = BaseImageEncoderConfig()
     """specifies the vision-language network config"""
-    clip_downscale_factor: int = 4
+    clip_downscale_factor: int = 2
     """The downscale factor for the clip pyramid"""
     num_random_masks: int = 15
     """Number of random masks to sample for contrastive loss"""
