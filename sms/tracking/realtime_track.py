@@ -14,6 +14,7 @@ import warp as wp
 from ur5py.ur5 import UR5Robot
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
+WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
 
 def clear_tcp(robot):
     tool_to_wrist = RigidTransform()
