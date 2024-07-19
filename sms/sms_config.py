@@ -102,14 +102,14 @@ sms_data_method = MethodSpecification(
         method_name="sms-data",
         steps_per_eval_image=100,
         steps_per_eval_batch=100,
-        steps_per_save=500,
+        steps_per_save=100,
         steps_per_eval_all_images=100000, 
         max_num_iterations=30000,
         mixed_precision=False,
         gradient_accumulation_steps = {'camera_opt': 100,'color':10,'shs':10},
         pipeline=smsdataPipelineConfig(
             datamanager=FullImageDatamanagerConfig(
-                dataparser=NerfstudioDataParserConfig(load_3D_points=True),
+                dataparser=NerfstudioDataParserConfig(load_3D_points=True, orientation_method='none', center_method='none', auto_scale_poses=False),
                 network=OpenCLIPNetworkConfig(
                     clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512, device='cuda:0'
                 ),
