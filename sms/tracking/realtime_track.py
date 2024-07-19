@@ -189,7 +189,7 @@ def main(
             start_time4 = time.time()
             K = torch.from_numpy(zed.get_K()).float().cuda()
             assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
-            points, colors = Zed.project_depth(left, depth, K)
+            points, colors = Zed.project_depth(left, depth, K, depth_threshold=0.5, subsample=6)
             server.add_point_cloud(
                 "camera/points",
                 points=points,

@@ -360,7 +360,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.temp_opacities = None
         self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
-        self.cluster_eps = ViewerSlider("Cluster Eps", 0.1, 0.01, 1.0, 0.01)
+        self.cluster_eps = ViewerSlider("Cluster Eps", 0.08, 0.01, 1.0, 0.01)
 
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         super().load_state_dict(dict, **kwargs)
