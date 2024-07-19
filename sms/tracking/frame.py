@@ -5,6 +5,7 @@ from torchvision.transforms.functional import resize
 from sms.tracking.utils2 import *
 from nerfstudio.model_components.losses import depth_ranking_loss
 from sms.tracking.utils import *
+import time
 
 class Frame:
     """
@@ -53,7 +54,7 @@ class Frame:
             (camera.height, camera.width),
             antialias=True,
         ).permute(1, 2, 0)
-            
+                    
         self.hand_mask = get_hand_mask((self.rgb * 255).to(torch.uint8))
         self.hand_mask = (
             torch.nn.functional.max_pool2d(

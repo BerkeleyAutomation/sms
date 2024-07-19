@@ -207,7 +207,9 @@ class Optimizer:
     def set_frame(self, rgb, ns_camera, depth) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
+        
         frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
+        
         self.optimizer.set_frame(frame)
 
     def init_obj_pose(self):

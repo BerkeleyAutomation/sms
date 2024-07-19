@@ -24,7 +24,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl/sms-data/2024-07-18_163924/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl_zed2/sms-data/2024-07-19_154619/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -79,14 +79,7 @@ def main(
         position=zed.cam_to_zed.translation,
         wxyz=zed.cam_to_zed.quaternion,
     )
-    # zed_intr = zed.get_K()
-    # ns_camera = Cameras(fx=zed_intr[0][0],
-    #                     fy=zed_intr[1][1],
-    #                     cx=zed_intr[0][2],
-    #                     cy=zed_intr[1][2],
-    #                     width=zed.width,
-    #                     height=zed.height,
-    #                     camera_to_worlds=torch.from_numpy(camera_tf.matrix[:3,:4]).unsqueeze(0).float())
+
     l, _, depth = zed.get_frame(depth=True)  # type: ignore
     
     toad_opt = Optimizer(
