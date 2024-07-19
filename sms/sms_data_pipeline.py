@@ -431,9 +431,22 @@ class smsdataPipeline(VanillaPipeline):
                 return
         else:
             # Handle case where we have precomputed cluster labels
+            vote = int(torch.tensor(self.model.cluster_labels[sphere_inds].mode())[0].item()) # mode group ID from the click sphere samples
             
-            vote = int(torch.tensor(self.model.cluster_labels[sphere_inds].mode())[0].item())
-            keep_list = [torch.where(self.model.cluster_labels == vote)[0]]
+            keep_inds_list = torch.where(self.model.cluster_labels == vote)[0] # get all points in the same group as the click sphere samples
+            keep_points_o3d = points.select_by_index(keep_inds_list.tolist()) # clustered points in o3d format for DBSCAN
+            
+            sphere_ind_vote = torch.where(self.model.cluster_labels[sphere_inds] == vote)[0]
+            
+            sphere_inds_keep = [(torch.where(keep_inds_list == torch.tensor(sphere_inds)[i])[0]).item() for i in sphere_ind_vote.tolist()]
+            # Secondary clustering in cartesian space to filter outliers
+            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.013, min_points=1)
+            inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
+            keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
+            keep_list = [keep_inds_list[keep_inds_list_inner]]
+            
+            
+            
             
 
         # Remove the click handle + visualization

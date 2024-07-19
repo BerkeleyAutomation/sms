@@ -1150,19 +1150,13 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     idx = torch.randperm(len(mask))
 
                     for i in range(len(mask)-1):
-                        # print("size of mask 1: ", mask[idx[i]].sum())
-                        # print("size of mask 2: ", mask[idx[i+1]].sum())
-                        if mask[idx[i]].sum() <= 50 or mask[idx[i+1]].sum() <= 50:
+                        if mask[idx[i]].sum() <= 50 or mask[idx[i+1]].sum() <= 50: # TODO: Turn this into screensize instead of ray count
                             continue
                         instance_loss += (
                             F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
                     loss = instance_loss / (len(mask)-1)
-                    # print(f"instance loss: {loss}")
                     if loss != 0:
-                        # print(f"instance loss: {loss}")
                         loss_dict["instance_loss"] = loss
-                    # else:
-                    #     import pdb; pdb.set_trace()
 
         if outputs['dino'] is not None:
             gt = batch['dino']
