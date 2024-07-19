@@ -23,7 +23,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl/sms-data/2024-07-17_213522/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl/sms-data/2024-07-18_163924/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -132,8 +132,11 @@ def main(
                 start_time3 = time.time()
                 toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
                 print("Set frame in ", time.time()-start_time3)
+                start_time5 = time.time()
+                n_opt_iters = 25
                 with zed.raft_lock:
-                    outputs = toad_opt.step_opt(niter=25)
+                    outputs = toad_opt.step_opt(niter=n_opt_iters)
+                print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
                 # Add ZED img and GS render to viser
                 server.add_image(
@@ -156,20 +159,19 @@ def main(
                     visible=True
                 )
                 
-                tf_list = toad_opt.get_parts2cam()
-                # print(tf_list)
+                tf_list = toad_opt.get_parts2world()
                 for idx, tf in enumerate(tf_list):
                     server.add_frame(
-                        f"camera/object/group_{idx}",
+                        f"object/group_{idx}",
                         position=tf.translation(),
                         wxyz=tf.rotation().wxyz,
                         show_axes=True,
-                        axes_length=0.02,
-                        axes_radius=.002
+                        axes_length=0.05,
+                        axes_radius=.001
                     )
                     mesh = toad_opt.toad_object.meshes[idx]
                     server.add_mesh_trimesh(
-                        f"camera/object/group_{idx}/mesh",
+                        f"object/group_{idx}/mesh",
                         mesh=mesh,
                     )
                     # grasps = toad_opt.toad_object.grasps[idx] # [N_grasps, 7]

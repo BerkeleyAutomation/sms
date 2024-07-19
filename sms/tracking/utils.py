@@ -13,9 +13,9 @@ def poses_7vec_to_transform(poses: wp.array(dtype=float, ndim=2), i: int):
 
 @wp.kernel
 def apply_to_model(
-    init_o2w: wp.array(dtype=float, ndim=2),
-    init_p2os: wp.array(dtype=float, ndim=2),
-    o_delta: wp.array(dtype=float, ndim=2),
+    # init_o2w: wp.array(dtype=float, ndim=2),
+    init_p2ws: wp.array(dtype=float, ndim=2),
+    # o_delta: wp.array(dtype=float, ndim=2),
     p_deltas: wp.array(dtype=float, ndim=2),
     group_labels: wp.array(dtype=int),
     means: wp.array(dtype=wp.vec3),
@@ -27,9 +27,9 @@ def apply_to_model(
     """
     Kernel for applying the transforms to a gaussian splat
 
-    init_o2w: 1x7 tensor of initial object to world poses
-    init_p2os: Nx7 tensor of initial pose to object poses
-    o_delta: Nx7 tensor of object pose deltas represented as objnew_to_objoriginal
+    [removed] init_o2w: 1x7 tensor of initial object to world poses
+    init_p2ws: Nx7 tensor of initial pose to object poses
+    [removed] o_delta: Nx7 tensor of object pose deltas represented as objnew_to_objoriginal
     p_deltas: Nx7 tensor of pose deltas represented as partnew_to_partoriginal
     group_labels: N, tensor of group labels (0->K-1) for K groups
     means: Nx3 tensor of means
@@ -39,13 +39,13 @@ def apply_to_model(
     """
     tid = wp.tid()
     group_id = group_labels[tid]
-    o2w_T = poses_7vec_to_transform(init_o2w,0)
-    p2o_T = poses_7vec_to_transform(init_p2os,group_id)
-    odelta_T = poses_7vec_to_transform(o_delta,0)
+    # o2w_T = poses_7vec_to_transform(init_o2w,0)
+    p2w_T = poses_7vec_to_transform(init_p2ws,group_id)
+    # odelta_T = poses_7vec_to_transform(o_delta,0)
     pdelta_T = poses_7vec_to_transform(p_deltas,group_id)
     g2w_T = wp.transformation(means[tid], wp.quaternion(quats[tid, 1], quats[tid, 2], quats[tid, 3], quats[tid, 0]))
-    g2p_T = wp.transform_inverse(p2o_T) * wp.transform_inverse(o2w_T) * g2w_T
-    new_g2w_T = o2w_T * odelta_T * p2o_T * pdelta_T * g2p_T
+    g2p_T = wp.transform_inverse(p2w_T) * g2w_T
+    new_g2w_T = p2w_T * pdelta_T * g2p_T
     means_out[tid] = wp.transform_get_translation(new_g2w_T)
     new_quat = wp.transform_get_rotation(new_g2w_T)
     quats_out[tid, 0] = new_quat[3] #w

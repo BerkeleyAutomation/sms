@@ -225,8 +225,8 @@ class Zed():
         self.raft_lock = Lock()
         self.dir_path = pathlib.Path(__file__).parent.resolve()
         self.stereo_ckpt = os.path.join(self.dir_path,'models/stereo_20230724.pt')
-        # with self.raft_lock:
-            # self.model = StereoModel(self.stereo_ckpt)
+        with self.raft_lock:
+            self.model = StereoModel(self.stereo_ckpt)
 
         # left_cx = self.get_K(cam='left')[0,2]
         # right_cx = self.get_K(cam='right')[0,2]

@@ -215,7 +215,7 @@ class Optimizer:
         Also updates `initialized` to `True`."""
         # retval only matters for visualization
         start = time.time()
-        xs, ys, outputs, renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=7)
+        xs, ys, renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=7)
         print(f"Time taken for init (pose opt): {time.time() - start:.2f} s")
 
         start = time.time()
@@ -268,6 +268,20 @@ class Optimizer:
             ) for pose in parts2cam
         ]
         return parts2cam_vtf
+    
+    def get_parts2world(self,keyframe=None) -> List[vtf.SE3]:
+        """Get the parts' poses in world frame. Wrapper for `RigidGroupOptimizer.get_poses_relative_to_camera`."""
+        # Note: `get_poses_relative_to_camera` has dataset_scale scaling built in.
+        parts2world = self.optimizer.get_part_poses(keyframe=keyframe)
+
+        # Convert to vtf.SE3.
+        parts2world_vtf = [
+            vtf.SE3.from_rotation_and_translation(
+                rotation=vtf.SO3.from_matrix(pose[:3,:3].cpu().numpy()),
+                translation=pose[:3,3].cpu().numpy()
+            ) for pose in parts2world
+        ]
+        return parts2world_vtf
 
     def get_hands(self, keyframe: int) -> List[trimesh.Trimesh]:
         """Get hands in camera frame."""
