@@ -228,6 +228,7 @@ class smsdataPipeline(VanillaPipeline):
         self.crop_group = []
 
         self.add_crop_to_group_list = ViewerButton(name="Add Crop to Group List", cb_hook=self._add_crop_to_group_list, disabled=True)
+        self.add_crop_to_previous_group = ViewerButton(name="Add Crop to Previous Group", cb_hook=self._add_crop_to_previous_group, disabled=True)
         self.view_crop_group_list = ViewerButton(name="View Crop Group List", cb_hook=self._view_crop_group_list, disabled=True)
         self.crop_group_list = []
         self.keep_inds = None
@@ -319,6 +320,12 @@ class smsdataPipeline(VanillaPipeline):
         self.crop_group_list.append(self.crop_group[0])
         self._reset_state(None, pop=False)
         self.view_crop_group_list.set_disabled(False)
+    
+    def _add_crop_to_previous_group(self, button: ViewerButton):
+        """Combine the current crop with the previous group"""
+        self.crop_group_list[-1] = torch.cat([self.crop_group_list[-1], self.crop_group[0]])
+        self._reset_state(None, pop=False)
+        self.view_crop_group_list.set_disabled(False)
 
     def _view_crop_group_list(self, button: ViewerButton):
         if len(self.crop_group_list) == 0:
@@ -334,7 +341,6 @@ class smsdataPipeline(VanillaPipeline):
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
         self.keep_inds = keep_inds
-
 
     def _crop_to_click(self, button: ViewerButton):
         """Crop to click location"""
@@ -444,11 +450,7 @@ class smsdataPipeline(VanillaPipeline):
             inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
             keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
             keep_list = [keep_inds_list[keep_inds_list_inner]]
-            
-            
-            
-            
-
+        
         # Remove the click handle + visualization
         self.click_location = None
         self.click_handle.remove()
@@ -457,6 +459,8 @@ class smsdataPipeline(VanillaPipeline):
         self.crop_group = keep_list
         
         self.add_crop_to_group_list.set_disabled(False)
+        if len(self.crop_group_list) > 0:
+            self.add_crop_to_previous_group.set_disabled(False)
         self.move_current_crop.set_disabled(False)
 
         keep_inds = self.crop_group[0]
