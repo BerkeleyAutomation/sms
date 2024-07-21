@@ -605,6 +605,11 @@ class smsdataPipeline(VanillaPipeline):
                 shs_0 = model.shs_0.contiguous().cpu().numpy()
                 for i in range(shs_0.shape[1]):
                     map_to_tensors[f"f_dc_{i}"] = shs_0[:, i, None]
+                    
+                assert shs_0.shape[1] == 3
+                map_to_tensors[f"red"] = int(shs_0[:, 0] * 255)
+                map_to_tensors[f"green"] = int(shs_0[:, 1] * 255)
+                map_to_tensors[f"blue"] = int(shs_0[:, 2] * 255)
 
                 # transpose(1, 2) was needed to match the sh order in Inria version
                 shs_rest = model.shs_rest.transpose(1, 2).contiguous().cpu().numpy()

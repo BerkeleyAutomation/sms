@@ -255,7 +255,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.localized_query = None
         self.best_scales = None
         
-
     def populate_modules(self):
         if self.seed_points is not None and not self.config.random_init:
             means = torch.nn.Parameter(self.seed_points[0])  # (Location, Color)
@@ -307,9 +306,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 "features_rest": features_rest,
                 "opacities": opacities,
                 "dino_feats": torch.nn.Parameter(torch.randn((num_points, self.config.gaussian_dim))),
-                "cluster_labels": torch.nn.Parameter(torch.zeros((num_points, 1))),
-                # "obj_ids": obj_ids,
-                # "components": components,
             }
         )
         torch.inverse(torch.ones((1, 1), device="cuda:0"))# https://github.com/pytorch/pytorch/issues/90613
@@ -1397,8 +1393,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
 
         self.cluster_labels = torch.Tensor(labels)
 
-        self.gauss_params['cluster_labels'] = self.cluster_labels.unsqueeze(-1)
-
         self.rgb1_cluster0 = not self.rgb1_cluster0
         self.cluster_scene.set_disabled(False)
         
@@ -1508,46 +1502,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
         x = x / x.norm(dim=-1, keepdim=True)
 
         return self.gaussian_field.get_instance_outputs_from_feature(x)
-    
-    def _export_visible_gaussians(self, button: ViewerButton):
-        """Export the visible gaussians to a .ply file"""
-        # location to save
-        output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
-        filename = Path(output_dir) / f"gaussians.ply"
-
-        # Copied from exporter.py
-        map_to_tensors = {}
-
-        with torch.no_grad():
-            positions = self.gauss_params['means'].cpu().numpy()
-            map_to_tensors["positions"] = o3d.core.Tensor(positions, o3d.core.float32)
-            map_to_tensors["normals"] = o3d.core.Tensor(np.zeros_like(positions), o3d.core.float32)
-
-            colors = self.colors.data.cpu().numpy()
-            map_to_tensors["colors"] = (colors * 255).astype(np.uint8)
-            for i in range(colors.shape[1]):
-                map_to_tensors[f"f_dc_{i}"] = colors[:, i : i + 1]
-
-            shs = self.shs_rest.data.cpu().numpy()
-            if self.config.sh_degree > 0:
-                shs = shs.reshape((colors.shape[0], -1, 1))
-                for i in range(shs.shape[-1]):
-                    map_to_tensors[f"f_rest_{i}"] = shs[:, i]
-
-            map_to_tensors["opacity"] = self.gauss_params['opacities'].data.cpu().numpy()
-
-            scales = self.gauss_params['scales'].data.cpu().unsqueeze(-1).numpy()
-            for i in range(3):
-                map_to_tensors[f"scale_{i}"] = scales[:, i]
-
-            quats = self.gauss_params['quats'].data.cpu().unsqueeze(-1).numpy()
-
-            for i in range(4):
-                map_to_tensors[f"rot_{i}"] = quats[:, i]
-
-        pcd = o3d.t.geometry.PointCloud(map_to_tensors)
-
-        o3d.t.io.write_point_cloud(str(filename), pcd)
 
 
     def get_max_across(self, means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None):
