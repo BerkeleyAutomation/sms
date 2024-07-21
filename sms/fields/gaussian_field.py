@@ -99,7 +99,7 @@ class GaussianField(Field):
             ]
         )
         tot_out_dims = sum([e.n_output_dims for e in self.clip_encs])
-        instance_n_dims = 64
+        instance_n_dims = 128
         print("Total output dims: ", tot_out_dims)
 
         # self.mlp_base_grid = HashEncoding(
