@@ -48,6 +48,7 @@ from sms.data.utils.Detic.detic.modeling.utils import reset_cls_test
 from sklearn.cluster import DBSCAN
 import matplotlib.patches as patches
 from segment_anything import sam_model_registry, SamPredictor
+import torch.nn.functional as F
 
 class DeticDataloader(FeatureDataloader):
     def __init__(
@@ -59,6 +60,8 @@ class DeticDataloader(FeatureDataloader):
     ):
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.sam = cfg["sam"]
+        self.cstm_vocab = cfg["custom_vocab"]
+        self.downscale_factor = cfg["downscale_factor"]
         # image_list: torch.Tensor = None,
         self.outs = [],
         super().__init__(cfg, device, image_list, cache_path)
@@ -85,7 +88,12 @@ class DeticDataloader(FeatureDataloader):
             print('SAM + Detic on device: ', self.device)
             self.sam_predictor = SamPredictor(sam)
         self.text_encoder = build_text_encoder(pretrain=True)
-        self.default_vocab()
+        if len(self.cstm_vocab) > 0:
+            print("Using custom vocabulary with classes: ", self.cstm_vocab)
+            self.custom_vocab(self.cstm_vocab)
+        else:
+            print("Using default vocabulary")
+            self.default_vocab()
 
         if image_list is not None:
 
@@ -121,8 +129,8 @@ class DeticDataloader(FeatureDataloader):
                 torch.full((3, 3), 1.0).view(1, 1, 3, 3).to("cuda"),
                     padding=1,
                 )
-                eroded_masks = ~(eroded_masks >= 2) #.squeeze(1)
-                # import pdb; pdb.set_trace()
+                eroded_masks = ~(eroded_masks >= 2) 
+
                 # Filter out small masks
                 filtered_idx = []
                 for i in range(len(masks)):
@@ -130,6 +138,12 @@ class DeticDataloader(FeatureDataloader):
                         filtered_idx.append(i)
                 filtered_masks = torch.cat([eroded_masks[filtered_idx], bg_mask.unsqueeze(0).unsqueeze(0)], dim=0).cpu().numpy()
 
+                if self.downscale_factor > 1:
+                    scaled_height = H//self.downscale_factor
+                    scaled_width = W//self.downscale_factor
+                    filtered_masks = F.interpolate(torch.from_numpy(filtered_masks).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).squeeze(1).view(-1, scaled_height*scaled_width)
+                    filtered_masks = filtered_masks.numpy()
+                    
                 outputs = {
                     # "vis": out,
                     "boxes": boxes,
@@ -141,12 +155,12 @@ class DeticDataloader(FeatureDataloader):
                     "components": components,
                     "scores" : output["instances"].scores,
                 }
-                # import pdb; pdb.set_trace()
+
                 self.outs[0].append(outputs['masks_filtered'])
-            # import pdb; pdb.set_trace()
+
             self.data = np.empty(len(image_list), dtype=object)
             self.data[:] = self.outs[0]
-            # self.data = torch.stack(self.outs[0], dim=0)
+
             print("Detic batch inference time: ", time.time() - start_time)
 
     # Overridden load method
@@ -198,20 +212,24 @@ class DeticDataloader(FeatureDataloader):
         num_classes = len(self.metadata.thing_classes)
         reset_cls_test(self.detic_predictor.model, classifier, num_classes)
 
+    def custom_vocab(self, classes):
+        self.metadata = MetadataCatalog.get("__unused2")
+        self.metadata.thing_classes = classes 
+        classifier = self.get_clip_embeddings(self.metadata.thing_classes)
+        num_classes = len(self.metadata.thing_classes)
+        reset_cls_test(self.detic_predictor.model, classifier, num_classes)
+
+        # Reset visualization threshold
+        output_score_threshold = 0.3
+        for cascade_stages in range(len(self.detic_predictor.model.roi_heads.box_predictor)):
+            self.detic_predictor.model.roi_heads.box_predictor[cascade_stages].test_score_thresh = output_score_threshold
+
     def get_clip_embeddings(self, vocabulary, prompt='a '):
         self.text_encoder.eval()
         texts = [prompt + x for x in vocabulary]
         emb = self.text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
         return emb
 
-    # def SAM_predictors(self, device):
-    #     sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
-    #     model_type = "vit_h"
-    #     device = device
-    #     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    #     sam.to(device=device)
-    #     self.sam_predictor = SamPredictor(sam)
-    
     def SAM(self, im, boxes, class_idx = None, metadata = None):
         self.sam_predictor.set_image(im)
         input_boxes = torch.tensor(boxes, device=self.sam_predictor.device)
@@ -229,22 +247,7 @@ class DeticDataloader(FeatureDataloader):
         cv2.imshow("Detic Predictions", output_im)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
-
-    # def custom_vocab(detic_predictor, classes):
-    #     vocabulary = 'lvis'
-    #     metadata = MetadataCatalog.get("__unused2")
-    #     metadata.thing_classes = classes # Change here to try your own vocabularies!
-    #     classifier = get_clip_embeddings(metadata.thing_classes)
-    #     num_classes = len(metadata.thing_classes)
-    #     reset_cls_test(detic_predictor.model, classifier, num_classes)
-
-    #     # Reset visualization threshold
-    #     output_score_threshold = 0.3
-    #     for cascade_stages in range(len(detic_predictor.model.roi_heads.box_predictor)):
-    #         detic_predictor.model.roi_heads.box_predictor[cascade_stages].test_score_thresh = output_score_threshold
-    #     return metadata
-
-
+        
     def predict(self, im):
         if im is None:
             print("Error: Unable to read the image file")
@@ -348,48 +351,3 @@ class DeticDataloader(FeatureDataloader):
             hsv_colors.append((hue, 1.0, 1.0))
 
         return [mcolors.hsv_to_rgb(color) for color in hsv_colors]
-
-
-    # def main(args):
-
-    #     # We are one directory up in Detic.
-    #     image_path = os.path.join("..", args.image_path)
-        
-    #     image = Image.open(image_path)
-    #     image = np.array(image, dtype=np.uint8)
-
-    #     detic_predictor = DETIC_predictor()
-    #     metadata = default_vocab(detic_predictor, args.classes)
-
-    #     boxes, class_idx = Detic(image, metadata, detic_predictor)
-    #     assert len(boxes) > 0, "Zero detections."
-    #     masks = SAM(image, boxes, class_idx, metadata, sam_predictor)
-
-    #     # Save detections as a png.
-    #     # Add "_bbox" before the suffix.
-    #     image_save_path = image_path.split(".")
-    #     image_save_path[-2] += "_bbox"
-    #     image_save_path = ".".join(image_save_path)
-    #     classes = [metadata.thing_classes[idx] for idx in class_idx]
-    #     visualize_output(image, masks, boxes, classes, image_save_path)
-
-    #     # Save only segmentation without bounding box as a separate image.
-    #     # Add "_segm" before the suffix.
-    #     image_save_path = image_path.split(".")
-    #     image_save_path[-2] += "_segm"
-    #     image_save_path = ".".join(image_save_path)
-    #     classes = [metadata.thing_classes[idx] for idx in class_idx]
-    #     visualize_output(image, masks, boxes, classes, image_save_path, mask_only=True)
-
-    #     # Save detections as a pickle.
-    #     pickle_save_path = image_path.split(".")
-    #     pickle_save_path[-2] += "_segm"
-    #     pickle_save_path[-1] = "pkl"
-    #     pickle_save_path = ".".join(pickle_save_path)
-
-    #     with open(pickle_save_path, "wb") as f:
-    #         pickle.dump({
-    #             "masks": masks.cpu().numpy(),
-    #             "boxes": boxes,  # y_min, x_min, y_max, x_max
-    #             "classes": classes
-    #         }, f)

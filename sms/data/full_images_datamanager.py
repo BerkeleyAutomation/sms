@@ -34,7 +34,6 @@ import os.path as osp
 import torch
 from copy import deepcopy
 from torch.nn import Parameter
-import torch.nn.functional as F
 from tqdm import tqdm
 
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -83,6 +82,11 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """Number of random masks to sample for contrastive loss"""
     use_denoiser: bool = False
     """Whether to use the denoiser for the dino encoder"""
+    lerf_step: int = 3500
+    """The step at which to begin supervising clip and groups"""
+    dino_step: int = 2000
+    """The step at which to begin supervising dino"""
+    
 
 
 class FullImageDatamanager(DataManager, Generic[TDataset]):
@@ -184,6 +188,8 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             device=device,
             cfg={
                 "sam": False,
+                "custom_vocab" : [],
+                "downscale_factor": self.config.clip_downscale_factor,
                 # "tile_size_res": self.config.patch_tile_size_res,
                 # "stride_scaler": self.config.patch_stride_scaler,
                 # "image_shape": list(images.shape[2:4]),
@@ -191,13 +197,12 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             },
             cache_path=detic_cache_path,
         )
-        # self.detic.create()
-        # self.detic.default_vocab()
 
         self.curr_scale = None
         self.random_pixels = None
         self.use_clip = True
-        self.lerf_step = 3000
+        self.lerf_step = self.config.lerf_step
+        self.dino_step = self.config.dino_step
 
     def cache_images(self, cache_images_option):
         cached_train = []
@@ -412,7 +417,11 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         """Returns the next training batch
 
         Returns a Camera instead of raybundle"""
-        image_idx = self.train_unseen_cameras.pop(random.randint(0, len(self.train_unseen_cameras) - 1))
+            
+        image_idx = self.train_unseen_cameras.pop(random.randint(0, len(self.train_unseen_cameras) - 1)) # Random idx
+
+        # image_idx = self.train_unseen_cameras.pop() # Sequential idx
+        
         # Make sure to re-populate the unseen cameras list if we have exhausted it
         if len(self.train_unseen_cameras) == 0:
             self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
@@ -430,41 +439,41 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
         #Pick a random scale from min to max and then the clip features at that scale
         H, W = data["image"].shape[:2]
         scale = torch.rand(1).to(self.device)*(self.config.patch_tile_size_range[1]-self.config.patch_tile_size_range[0])+self.config.patch_tile_size_range[0]
-        # scale = torch.tensor(0.1).to(self.device)
         self.curr_scale = scale
         scaled_height = H//self.config.clip_downscale_factor
         scaled_width = W//self.config.clip_downscale_factor
 
-        detic_masks = torch.from_numpy(self.detic.data[image_idx])
+        if step > self.lerf_step:
+            detic_masks = torch.from_numpy(self.detic.data[image_idx])
 
-        with torch.no_grad():
-            # detic_masks = detic_out["masks_filtered"]
-            perm = torch.randperm(len(detic_masks))
-            assert len(detic_masks) > 0, "No masks found"
+            with torch.no_grad():
+                perm = torch.randperm(len(detic_masks))
+                assert len(detic_masks) > 0, "No masks found"
 
-            num_samp = min(len(detic_masks), self.config.num_random_masks)
-            idx = perm[:num_samp]
-            masks = detic_masks[idx].squeeze(1)
+                num_samp = min(len(detic_masks), self.config.num_random_masks)
+                idx = perm[:num_samp]
+                masks = detic_masks[idx]
 
-            masks = F.interpolate(masks.unsqueeze(1).to(float), (scaled_height, scaled_width), mode = 'nearest').to(bool).view(num_samp, -1)
-            data["instance_masks"] = masks.squeeze(1)
+                data["instance_masks"] = masks
+            
+            # Masks out the background from RGB training, which is always the last detic_mask for the image
+            # data["mask"] = ~detic_masks[-1].squeeze(0).unsqueeze(-1)
+            
+            self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
+
+            x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
+            y = torch.arange(0, scaled_height*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1)
+            image_idx_tensor = torch.ones(scaled_height, scaled_width, 1)*image_idx
+            positions = torch.cat((image_idx_tensor, y, x), dim=-1).view(-1, 3).to(int)
+            positions = positions[self.random_pixels]
+            with torch.no_grad():
+                data["clip"], data["clip_scale"] = self.clip_interpolator(positions, scale)[0], self.clip_interpolator(positions, scale)[1]
+                camera.metadata["clip_downscale_factor"] = self.config.clip_downscale_factor
         
-        # Masks out the background from RGB training, which is always the last detic_mask for the image
-        # data["mask"] = ~detic_masks[-1].squeeze(0).unsqueeze(-1)
+        if step > self.dino_step:
+            with torch.no_grad():
+                data["dino"] = self.dino_dataloader.get_full_img_feats(image_idx)
         
-        self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
-
-        x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
-        y = torch.arange(0, scaled_height*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1)
-        image_idx_tensor = torch.ones(scaled_height, scaled_width, 1)*image_idx
-        positions = torch.cat((image_idx_tensor, y, x), dim=-1).view(-1, 3).to(int)
-        positions = positions[self.random_pixels]
-        with torch.no_grad():
-            data["clip"], data["clip_scale"] = self.clip_interpolator(positions, scale)[0], self.clip_interpolator(positions, scale)[1]
-            # data["dino"] = self.dino_dataloader(positions)
-            data["dino"] = self.dino_dataloader.get_full_img_feats(camera.metadata["cam_idx"])
-        
-        camera.metadata["clip_downscale_factor"] = self.config.clip_downscale_factor
         return camera, data
 
     def next_eval(self, step: int) -> Tuple[Cameras, Dict]:
