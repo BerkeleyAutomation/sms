@@ -13,17 +13,6 @@ from pathlib import Path
 import tyro
 import pickle as pkl
 
-# from curobo.geom.types import Mesh, Sphere
-
-MANO_INDICES = [
-    745,  # thumb
-    349,  # index
-    429,  # middle
-    554,  # ring
-    692,  # pinky
-]
-
-
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class ToadObject:
     """

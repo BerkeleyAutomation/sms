@@ -221,11 +221,14 @@ class GaussianField(Field):
         # outputs[GaussianFieldHeadNames.DINO] = dino_pass
         return outputs
     
-    def get_instance_outputs_from_feature(self, features) -> Dict[GaussianFieldHeadNames, Tensor]:
-        outputs = {}
-
+    def get_instance_outputs_from_feature(self, features) -> Tensor:
         epsilon = 1e-5
         instance_pass = self.instance_net(features)
         outputs = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
+        return outputs
+    
+    def get_clip_outputs_from_feature(self, features, clip_scale) -> Tensor:
+        clip_pass = self.clip_net(torch.cat([features, clip_scale.view(-1, 1)], dim=-1))
+        outputs = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
         return outputs

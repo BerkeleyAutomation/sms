@@ -25,6 +25,8 @@ from sms.tracking.toad_object import ToadObject
 from sms.tracking.frame import Frame
 from sms.data.utils.dino_dataloader2 import DinoDataloader
 import os.path as osp
+from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
+
 
 class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
@@ -86,7 +88,7 @@ class Optimizer:
 
         self.num_groups = len(group_masks)
         
-        # Init DINO dataloader for extractor fn
+        # Init DINO dataloader for 'Frames' extractor_fn
         cache_dir = config_path.parent.parent.parent
         dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
         
@@ -97,15 +99,6 @@ class Optimizer:
             cache_path=dino_cache_path,
             use_denoiser=False,
         )
-
-        # Initialize camera -- in world coordinates.
-        # assert init_cam_pose is None
-        # H = np.eye(4)
-        # from viser import transforms as vtf
-        # H[:3,:3] = vtf.SO3.from_x_radians(np.pi/4).as_matrix()
-        # H = H[:3, :]
-        # init_cam_pose = torch.tensor(H).float().reshape(1, 3, 4)
-
         
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)
@@ -145,8 +138,6 @@ class Optimizer:
 
         self.optimizer = RigidGroupOptimizer(
             self.pipeline.model,
-            # self.pipeline.datamanager.dino_dataloader,
-            # cam2world_ns,
             group_masks=group_masks,
             group_labels=group_labels,
             dataset_scale=dataset_scale,
@@ -161,7 +152,7 @@ class Optimizer:
             self.optimizer.group_labels.detach().cpu().numpy(),
             scene_scale=self.optimizer.dataset_scale,
         )
-        print(f"Time taken for init (toad_object): {time.time() - start:.2f} s")
+        print(f"Time taken for init (object): {time.time() - start:.2f} s")
 
         self.initialized = False
 
@@ -302,3 +293,29 @@ class Optimizer:
             h.vertices = h.vertices / self.optimizer.dataset_scale
 
         return hands
+    
+    def get_most_relevant_object(self, clip_encoder: OpenCLIPNetwork) -> int:
+        group_labels = self.optimizer.group_labels
+        group_masks = self.optimizer.group_masks
+        
+        init_means = self.optimizer.init_means # (N, 3)
+        distances, indicies = self.optimizer.sms_model.k_nearest_sklearn(init_means, 3, True)
+        distances = torch.from_numpy(distances).to(self.device)
+        indicies = torch.from_numpy(indicies).view(-1)
+        weights = torch.sigmoid(self.optimizer.init_opacities[indicies].view(-1, 4))
+        weights = torch.nn.Softmax(dim=-1)(weights)
+        points = init_means[indicies]
+        
+        hash_encoding = self.optimizer.sms_model.gaussian_field.get_hash(points) # (N, 3) -> (N, 96)
+        hash_encoding = hash_encoding.view(-1, 4, hash_encoding.shape[1])
+        hash_encoding = (hash_encoding * weights.unsqueeze(-1))
+        hash_encoding = hash_encoding.sum(dim=1)
+        
+        clip_feats = self.optimizer.sms_model.gaussian_field.get_clip_outputs_from_feature(hash_encoding, 
+            self.optimizer.sms_model.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device)) # (N, 96) -> (N, 512)
+        
+        relevancy = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.num_points, -1)
+            
+        import pdb; pdb.set_trace()
+        # for mask in group_masks:
+    

@@ -53,15 +53,15 @@ class RigidGroupOptimizer:
         self.dataset_scale = dataset_scale
         self.tape = None
         self.is_initialized = False
-        self.hand_lefts = []#list of bools for each hand frame
+        self.hand_lefts = [] #list of bools for each hand frame
         self.sms_model = sms_model
         # detach all the params to avoid retain_graph issue
-        self.sms_model.gauss_params["means"] = self.sms_model.gauss_params[
-            "means"
-        ].detach().clone()
-        self.sms_model.gauss_params["quats"] = self.sms_model.gauss_params[
-            "quats"
-        ].detach().clone()
+        # self.sms_model.gauss_params["means"] = self.sms_model.gauss_params[
+        #     "means"
+        # ].detach().clone()
+        # self.sms_model.gauss_params["quats"] = self.sms_model.gauss_params[
+        #     "quats"
+        # ].detach().clone()
         # self.dino_loader = dino_loader
         self.group_labels = group_labels
         self.group_masks = group_masks
@@ -87,12 +87,9 @@ class RigidGroupOptimizer:
             self.atap = ATAPLoss(sms_model, group_masks, group_labels, self.dataset_scale)
         self.init_means = self.sms_model.gauss_params["means"].detach().clone()
         self.init_quats = self.sms_model.gauss_params["quats"].detach().clone()
+        self.init_opacities = self.sms_model.gauss_params["opacities"].detach().clone()
         # Save the initial object to world transform, and initial part to object transforms
-        # self.init_o2w = torch.from_numpy(vtf.SE3.from_rotation_and_translation(
-        #     vtf.SO3.identity(), self.init_means.mean(dim=0).cpu().numpy().squeeze()
-        # ).as_matrix()).float().cuda()
-        # self.init_o2w_7vec = torch.tensor([[0,0,0,1,0,0,0]],dtype=torch.float32,device='cuda')
-        # self.init_o2w_7vec[0,:3] = self.init_means.mean(dim=0).squeeze()
+
         self.init_p2w = torch.empty(len(self.group_masks), 4, 4, dtype=torch.float32, device="cuda")
         self.init_p2w_7vec = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
         self.init_p2w_7vec[:,3] = 1.0
@@ -102,7 +99,6 @@ class RigidGroupOptimizer:
             self.init_p2w[i,:,:] = torch.from_numpy(vtf.SE3.from_rotation_and_translation(
                 vtf.SO3.identity(), (gp_centroid).cpu().numpy()
             ).as_matrix()).float().cuda()
-        # import pdb; pdb.set_trace()
 
     def initialize_obj_pose(self, niter=100, n_seeds=6, render=False):
         renders = []

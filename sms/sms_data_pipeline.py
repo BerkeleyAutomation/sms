@@ -238,6 +238,12 @@ class smsdataPipeline(VanillaPipeline):
 
         self.reset_state = ViewerButton(name="Reset State", cb_hook=self._reset_state, disabled=True)
 
+        self.z_export_options = ViewerCheckbox(name="Export Options", default_value=False, cb_hook=self._update_export_options)
+        self.z_export_options_visible_gaussians = ViewerButton(
+            name="Export Visible Gaussians",
+            visible=False,
+            cb_hook=self._export_visible_gaussians
+            )
 
     # this only calcualtes the features for the given image
     def add_image(
@@ -568,3 +574,71 @@ class smsdataPipeline(VanillaPipeline):
             mesh=sphere_mesh,
             position=VISER_NERFSTUDIO_SCALE_RATIO * self.click_location,
         )
+        
+    def _update_export_options(self, checkbox: ViewerCheckbox):
+        """Update the UI based on the export options"""
+        self.z_export_options_visible_gaussians.set_hidden(not checkbox.value)
+        
+    def _export_visible_gaussians(self, button: ViewerButton):
+        """Export the visible gaussians to a .ply file"""
+        # location to save
+        output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
+        filename = Path(output_dir) / f"gaussians.ply"
+
+        # Copied from exporter.py
+        from collections import OrderedDict
+        map_to_tensors = OrderedDict()
+        model=self.model
+
+        with torch.no_grad():
+            positions = model.means.cpu().numpy()
+            count = positions.shape[0]
+            n = count
+            map_to_tensors["x"] = positions[:, 0]
+            map_to_tensors["y"] = positions[:, 1]
+            map_to_tensors["z"] = positions[:, 2]
+            map_to_tensors["nx"] = np.zeros(n, dtype=np.float32)
+            map_to_tensors["ny"] = np.zeros(n, dtype=np.float32)
+            map_to_tensors["nz"] = np.zeros(n, dtype=np.float32)
+
+            if model.config.sh_degree > 0:
+                shs_0 = model.shs_0.contiguous().cpu().numpy()
+                for i in range(shs_0.shape[1]):
+                    map_to_tensors[f"f_dc_{i}"] = shs_0[:, i, None]
+
+                # transpose(1, 2) was needed to match the sh order in Inria version
+                shs_rest = model.shs_rest.transpose(1, 2).contiguous().cpu().numpy()
+                shs_rest = shs_rest.reshape((n, -1))
+                for i in range(shs_rest.shape[-1]):
+                    map_to_tensors[f"f_rest_{i}"] = shs_rest[:, i, None]
+            else:
+                colors = torch.clamp(model.colors.clone(), 0.0, 1.0).data.cpu().numpy()
+                map_to_tensors["colors"] = (colors * 255).astype(np.uint8)
+
+            map_to_tensors["opacity"] = model.opacities.data.cpu().numpy()
+
+            scales = model.scales.data.cpu().numpy()
+            for i in range(3):
+                map_to_tensors[f"scale_{i}"] = scales[:, i, None]
+
+            quats = model.quats.data.cpu().numpy()
+            for i in range(4):
+                map_to_tensors[f"rot_{i}"] = quats[:, i, None]
+
+        # post optimization, it is possible have NaN/Inf values in some attributes
+        # to ensure the exported ply file has finite values, we enforce finite filters.
+        select = np.ones(n, dtype=bool)
+        for k, t in map_to_tensors.items():
+            n_before = np.sum(select)
+            select = np.logical_and(select, np.isfinite(t).all(axis=-1))
+            n_after = np.sum(select)
+            if n_after < n_before:
+                CONSOLE.print(f"{n_before - n_after} NaN/Inf elements in {k}")
+
+        if np.sum(select) < n:
+            CONSOLE.print(f"values have NaN/Inf in map_to_tensors, only export {np.sum(select)}/{n}")
+            for k, t in map_to_tensors.items():
+                map_to_tensors[k] = map_to_tensors[k][select]
+            count = np.sum(select)
+        from nerfstudio.scripts.exporter import ExportGaussianSplat
+        ExportGaussianSplat.write_ply(str(filename), count, map_to_tensors)
