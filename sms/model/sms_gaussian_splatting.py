@@ -1263,47 +1263,19 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 # set the colors of the gaussians accordingly using colormap from matplotlib
                 cluster_mask = np.where(labels == c_id)
 
-                # import pdb; pdb.set_trace()
                 avg_relevancy_per_cluster.append(relevancy[cluster_mask][..., 0].mean().item())
-                # features_dc[cluster_mask] = RGB2SH(self.colormap[c_id, :3].to(self.gauss_params['features_dc']))
-                # features_rest[cluster_mask] = 0
+
             cluster_argmax = np.array(avg_relevancy_per_cluster).argmax()
 
             cluster_mask = np.where(labels != cluster_argmax)
             # import pdb; pdb.set_trace()
             self.temp_opacities = self.opacities.data.clone()
             self.temp_opacities[cluster_mask[0]] = self.opacities.data.min()/2
-            # import pdb; pdb.set_trace()
-            # self._crop_center_init = means_freeze[cluster_mask[0]].cpu().numpy()
-            
-            # query = self._crop_center_init / self.viser_scale_ratio
-
-            # self.viewer_control.viser_server.add_icosphere(
-            # "/query",
-            # radius = self.best_scales[0].item(), 
-            # color = (1.0, 1.0, 1.0),
-            # position=(query[0], query[1], query[2]),
-            # )
-
-
-            # H = self.datamanager.train_dataset._dataparser_outputs.dataparser_transform
-            # row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=H.device)
-
-            # inv_H = torch.cat([torch.cat([H[:3, :3].transpose(1, 0), -H[:3, 3:]], dim=1), row], dim=0)
-            # query_world = inv_H @ torch.tensor([query[0], query[1], query[2], 1],dtype=torch.float32,device=H.device)
-            # print("Query Location:", query_world / VISER_NERFSTUDIO_SCALE_RATIO)
-            # print("Best Scale:", self.best_scales[0].item())
-
-            # self.localized_query = query_world[:3].cpu().numpy() / VISER_NERFSTUDIO_SCALE_RATIO
 
             self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
 
     def crop_to_word_cb(self,element):
         with torch.no_grad():
-            # clip_feats = self.gaussian_field.get_outputs_from_feature(self.clip_hash / self.clip_hash.norm(dim=-1,keepdim=True), self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
-            # clip_feats = self.gaussian_field.get_outputs(self.means, self.crop_scale.value * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
-            # clip_feats = self.gaussian_field.get_outputs(self.means, self.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device))[GaussianFieldHeadNames.CLIP].to(dtype=torch.float32)
-
             # Do K nearest neighbors for each point and then avg the clip hash for each point based on the KNN
             distances, indicies = self.k_nearest_sklearn(self.means.data, 3, True)
             distances = torch.from_numpy(distances).to(self.device)
@@ -1464,7 +1436,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         clusterer = HDBSCAN(
             cluster_selection_epsilon=eps,
             min_samples=25,
-            min_cluster_size=30,
+            min_cluster_size=1000,
             allow_single_cluster=False,
         ).fit(group_feats_downsampled)
 

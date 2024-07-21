@@ -102,15 +102,6 @@ class GaussianField(Field):
         instance_n_dims = 128
         print("Total output dims: ", tot_out_dims)
 
-        # self.mlp_base_grid = HashEncoding(
-        #     num_levels=num_levels,
-        #     min_res=base_res,
-        #     max_res=max_res,
-        #     log2_hashmap_size=log2_hashmap_size,
-        #     features_per_level=features_per_level,
-        #     implementation=implementation,
-        # )
-
         self.clip_net = tcnn.Network(
             n_input_dims=tot_out_dims+1,
             n_output_dims=clip_n_dims,
@@ -135,17 +126,6 @@ class GaussianField(Field):
             },
         )
 
-        # self.dino_net = tcnn.Network(
-        #     n_input_dims=tot_out_dims,
-        #     n_output_dims=384,
-        #     network_config={
-        #         "otype": "CutlassMLP",
-        #         "activation": "ReLU",
-        #         "output_activation": "None",
-        #         "n_neurons": 256,
-        #         "n_hidden_layers": 1,
-        #     },
-        # )
 
     @staticmethod
     def _get_encoding(start_res, end_res, levels, indim=3, hash_size=19, features_per_level=8):
@@ -175,17 +155,12 @@ class GaussianField(Field):
         outputs[GaussianFieldHeadNames.HASHGRID] = x.view(positions.shape[0], -1)
         
         clip_pass = self.clip_net(torch.cat([x, clip_scales.view(-1, 1)], dim=-1)).view(positions.shape[0], -1)
-       
-        # encoding = self.mlp_base_grid(positions.view(-1, 3))
-        # clip_pass = self.clip_net(torch.cat([encoding, clip_scales.view(-1, 1)], dim=-1))
+
         outputs[GaussianFieldHeadNames.CLIP] = (clip_pass / clip_pass.norm(dim=-1, keepdim=True)).to(torch.float32)
 
         epsilon = 1e-5
         instance_pass = self.instance_net(x).view(positions.shape[0], -1)
         outputs[GaussianFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
-
-        # dino_pass = self.dino_net(x).view(positions.shape[0], -1)
-        # outputs[GaussianFieldHeadNames.DINO] = dino_pass
 
         return outputs
 
@@ -196,15 +171,12 @@ class GaussianField(Field):
         encodings = [e(positions.view(-1, 3)) for e in self.clip_encs]
         encoding = torch.concat(encodings, dim=-1)
 
-        # import pdb; pdb.set_trace()
         return encoding.to(torch.float32)
     
     def get_outputs_from_feature(self, features, clip_scale, random_pixels = None) -> Dict[GaussianFieldHeadNames, Tensor]:
         outputs = {}
-        # import pdb; pdb.set_trace()
         
         #clip_features is Nx32, and clip scale is a number, I want to cat clip scale to the end of clip_features where clip scale is an int
-        # clip_pass = self.clip_feature_net(torch.cat([clip_features, clip_scale.view(-1, 1)], dim=-1))
         if random_pixels is not None:
             clip_features = features[random_pixels]
         else:
@@ -217,8 +189,6 @@ class GaussianField(Field):
         instance_pass = self.instance_net(features)
         outputs[GaussianFieldHeadNames.INSTANCE] = instance_pass / (instance_pass.norm(dim=-1, keepdim=True) + epsilon)
 
-        # dino_pass = self.dino_net(clip_features).view(clip_features.shape[0], -1)
-        # outputs[GaussianFieldHeadNames.DINO] = dino_pass
         return outputs
     
     def get_instance_outputs_from_feature(self, features) -> Tensor:
