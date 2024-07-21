@@ -106,7 +106,7 @@ sms_data_method = MethodSpecification(
         steps_per_eval_all_images=100000, 
         max_num_iterations=30000,
         mixed_precision=False,
-        gradient_accumulation_steps = {'camera_opt': 100,'color':10,'shs':10},
+        gradient_accumulation_steps = {'camera_opt': 100,'color':10,'shs':10, 'lerf': 3},  
         pipeline=smsdataPipelineConfig(
             datamanager=FullImageDatamanagerConfig(
                 dataparser=NerfstudioDataParserConfig(load_3D_points=True, orientation_method='none', center_method='none', auto_scale_poses=False),

@@ -228,6 +228,8 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """Output dimension of the feature rendering"""
     dino_rescale_factor: int = 5
     """How much to upscale rendered dino for supervision"""
+    min_mask_screensize: float = 0.003
+    """Minimum screen size of masks to use for supervision"""
 
 class smsGaussianSplattingModel(SplatfactoModel):
     """Nerfstudio's implementation of Gaussian Splatting
@@ -356,7 +358,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.temp_opacities = None
         self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
-        self.cluster_eps = ViewerSlider("Cluster Eps", 0.08, 0.01, 1.0, 0.01)
+        self.cluster_eps = ViewerSlider("Cluster Eps", 0.08, 0.001, 0.2, 0.01)
 
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         super().load_state_dict(dict, **kwargs)
@@ -955,7 +957,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         outputs["background"] = background
 
         if self.datamanager.use_clip or self.loaded_ckpt and not tracking:
-            if (self.step - self.datamanager.lerf_step > 500):
+            if (self.step - self.datamanager.lerf_step > 0):
                 if camera.metadata is not None:
                     if "clip_downscale_factor" not in camera.metadata:
                         return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background}
@@ -1041,42 +1043,43 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
 
         # DINO stuff
-        p_size = 14 #TODO: get from dataloader to not hardcode
-        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1050/max(H,W))/p_size
-        dino_K = K.clone()
-        dino_K[:, :2, :] *= downscale
-        h,w = get_img_resolution(H, W)
-        if self.training:
-            dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
-        else:
-            dino_h,dino_w = H,W
-        dino_feats, dino_alpha, _ = rasterization(
-            means=means_crop.detach() if self.training else means_crop,
-            quats=F.normalize(quats_crop,dim=1).detach(),
-            scales=torch.exp(scales_crop).detach(),
-            opacities=torch.sigmoid(opacities_crop).squeeze(-1).detach(),
-            colors=dino_crop,
-            viewmats=viewmat,  # [1, 4, 4]
-            Ks=dino_K,  # [1, 3, 3]
-            width=dino_w,
-            height=dino_h,
-            packed=False,
-            near_plane=0.01,
-            far_plane=1e10,
-            render_mode="RGB",
-            sparse_grad=False,
-            absgrad=False,
-            rasterize_mode=self.config.rasterize_mode,
-        )
-        feat_shape = dino_feats.shape
+        if (self.step - self.datamanager.dino_step > 0):
+            p_size = 14 #TODO: get from dataloader to not hardcode
+            downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1050/max(H,W))/p_size
+            dino_K = K.clone()
+            dino_K[:, :2, :] *= downscale
+            h,w = get_img_resolution(H, W)
+            if self.training:
+                dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
+            else:
+                dino_h,dino_w = H,W
+            dino_feats, dino_alpha, _ = rasterization(
+                means=means_crop.detach() if self.training else means_crop,
+                quats=F.normalize(quats_crop,dim=1).detach(),
+                scales=torch.exp(scales_crop).detach(),
+                opacities=torch.sigmoid(opacities_crop).squeeze(-1).detach(),
+                colors=dino_crop,
+                viewmats=viewmat,  # [1, 4, 4]
+                Ks=dino_K,  # [1, 3, 3]
+                width=dino_w,
+                height=dino_h,
+                packed=False,
+                near_plane=0.01,
+                far_plane=1e10,
+                render_mode="RGB",
+                sparse_grad=False,
+                absgrad=False,
+                rasterize_mode=self.config.rasterize_mode,
+            )
+            feat_shape = dino_feats.shape
 
-        dino_feats = torch.where(dino_alpha > 0, dino_feats / dino_alpha.detach(), torch.zeros(self.config.gaussian_dim, device=self.device))
-        nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
-        dino_feats = self.nn(nn_inputs).view(*feat_shape[:-1],-1)
-        if not self.training:
-            dino_feats[dino_alpha.squeeze(-1) < 0.8] = 0
-        outputs['dino'] = dino_feats.squeeze(0)
-        outputs['dino_alpha'] = dino_alpha.squeeze(0)
+            dino_feats = torch.where(dino_alpha > 0, dino_feats / dino_alpha.detach(), torch.zeros(self.config.gaussian_dim, device=self.device))
+            nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
+            dino_feats = self.nn(nn_inputs).view(*feat_shape[:-1],-1)
+            if not self.training:
+                dino_feats[dino_alpha.squeeze(-1) < 0.8] = 0
+            outputs['dino'] = dino_feats.squeeze(0)
+            # outputs['dino_alpha'] = dino_alpha.squeeze(0)
         # return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "clip": clip_im, "clip_scale": clip}  # type: ignore
         return outputs
     
@@ -1144,17 +1147,31 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     instance_loss = torch.tensor(0.0, device=self.device)
 
                     idx = torch.randperm(len(mask))
+                    
+                    total_ray_count = outputs["instance"].shape[0]
 
+                    count = 0
                     for i in range(len(mask)-1):
-                        if mask[idx[i]].sum() <= 50 or mask[idx[i+1]].sum() <= 50: # TODO: Turn this into screensize instead of ray count
+                        if ((mask[idx[i]].sum()/total_ray_count <= self.config.min_mask_screensize) 
+                            or 
+                            (mask[idx[i+1]].sum()/total_ray_count <= self.config.min_mask_screensize)):
                             continue
                         instance_loss += (
                             F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
-                    loss = instance_loss / (len(mask)-1)
+                        count += 1
+                        
+                    # for i in range(len(mask)-1):
+                    #     if (mask[i].sum()/total_ray_count <= self.config.min_mask_screensize):
+                    #         continue
+                    #     instance_loss += (
+                    #         F.relu(margin - torch.norm(outputs["instance"][mask[i]].mean(dim=0) - outputs["instance"][mask[-1]].mean(dim=0), p=2, dim=-1))).nansum()
+                    #     count += 1
+                        
+                    loss = instance_loss / count
                     if loss != 0:
                         loss_dict["instance_loss"] = loss
 
-        if outputs['dino'] is not None:
+        if 'dino' in outputs and 'dino' in batch:
             gt = batch['dino']
             gt = resize(gt.permute(2,0,1), (outputs['dino'].shape[0], outputs['dino'].shape[1])).permute(1,2,0)
             loss_dict['dino_loss'] = torch.nn.functional.mse_loss(outputs['dino'],gt)
@@ -1165,7 +1182,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 model.fit(means)
                 _, self.nearest_ids = model.kneighbors(means)
             # encourage the nearest neighbors to have similar dino feats
-            if self.step>1000:
+            if self.step > (self.datamanager.dino_step+1000):
                 loss_dict['dino_nn_loss'] = .01*self.gauss_params['dino_feats'][self.nearest_ids].var(dim=1).sum()
 
         return loss_dict
