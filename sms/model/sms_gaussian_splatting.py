@@ -1151,6 +1151,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     total_ray_count = outputs["instance"].shape[0]
 
                     count = 0
+                    
+                    # Contrastive loss between mask features
                     for i in range(len(mask)-1):
                         if ((mask[idx[i]].sum()/total_ray_count <= self.config.min_mask_screensize) 
                             or 
@@ -1160,12 +1162,20 @@ class smsGaussianSplattingModel(SplatfactoModel):
                             F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
                         count += 1
                         
+                    # instance_loss = instance_loss / count
                     # for i in range(len(mask)-1):
                     #     if (mask[i].sum()/total_ray_count <= self.config.min_mask_screensize):
                     #         continue
                     #     instance_loss += (
                     #         F.relu(margin - torch.norm(outputs["instance"][mask[i]].mean(dim=0) - outputs["instance"][mask[-1]].mean(dim=0), p=2, dim=-1))).nansum()
                     #     count += 1
+                    
+                    # Encourage features within a mask to be close to each other
+                    for i in range(len(mask)):
+                        if (mask[i].sum()/total_ray_count <= self.config.min_mask_screensize):
+                            continue
+                        instance_loss += F.relu(torch.norm(outputs["instance"][mask[idx[i]]] - outputs["instance"][mask[idx[i]]].mean(dim=0).repeat(mask[idx[i]].sum(),1), p=2, dim=-1)).nanmean()
+                        count += 1
                         
                     loss = instance_loss / count
                     if loss != 0:
