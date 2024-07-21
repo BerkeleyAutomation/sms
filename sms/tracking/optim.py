@@ -187,6 +187,8 @@ class Optimizer:
             # Wait for the user to set up the crops and groups.
             while getattr(self.pipeline.model, "best_scales") is None:
                 time.sleep(0.1)
+            while True:
+                time.sleep(0.1)
             _ = input("Model populated (interactively crop and press enter to continue)")
             self.keep_inds = self.pipeline.keep_inds
             cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)

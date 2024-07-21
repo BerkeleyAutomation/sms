@@ -11,11 +11,11 @@ from sms.tracking.prime_tri_zed import Zed
 from sms.tracking.optim import Optimizer
 from nerfstudio.cameras.cameras import Cameras
 import warp as wp
-# from ur5py.ur5 import UR5Robot
+from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 
 
-# WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
+WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 # WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
 
 def clear_tcp(robot):
@@ -26,7 +26,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl_zed2/sms-data/2024-07-19_154619/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl_and_tape1/sms-data/2024-07-20_221600/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -48,7 +48,7 @@ def main(
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
     query_handle = server.add_gui_button("Query", disabled=True) # Button for querying the object once the user has inputted the query
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     # try:
     zed = Zed() # Initialize ZED
     

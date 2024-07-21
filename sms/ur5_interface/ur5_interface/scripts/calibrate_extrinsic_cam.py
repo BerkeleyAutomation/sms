@@ -18,7 +18,7 @@ import pathlib
 # calibration_save_path = str(script_directory) + '/../calibration_outputs'
 calibration_save_path = "/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs"
 wrist_to_zed_mini_path = '/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_zed_mini.tf'
-wrist_to_zed_mini = RigidTransform.load(wrist_to_zed_mini_path)
+
 if not os.path.exists(calibration_save_path):
     os.makedirs(calibration_save_path)
 
@@ -145,6 +145,11 @@ def register_webcam():
     H_rob_worlds = []
     world_to_zed_extrinsic_rvecs = []
     world_to_zed_extrinsic_tvecs = []
+    
+    world_to_wrists = []
+    zed_mini_to_arucos = []
+    zed_extrinsic_to_arucos = []
+        
     center = np.array((0, -0.5, 0))
     trajectory_path = pathlib.Path(calibration_save_path + "/calibrate_extrinsics_trajectory.npy")
     traj = None
@@ -222,18 +227,35 @@ def register_webcam():
         print("zed_mini_to_aruco", zed_mini_to_aruco)
         print("zed_extrinsic_to_aruco", zed_extrinsic_to_aruco)
         world_to_wrist = H_rob_world.as_frames("wrist","world")
-        world_to_zed_extrinsic = world_to_wrist * wrist_to_zed_mini * zed_mini_to_aruco * zed_extrinsic_to_aruco.inverse()
-        world_to_zed_extrinsic_rvec,_ = cv2.Rodrigues(world_to_zed_extrinsic.rotation)
-        world_to_zed_extrinsic_tvec = world_to_zed_extrinsic.translation
-        world_to_zed_extrinsic_rvecs.append(world_to_zed_extrinsic_rvec)
-        world_to_zed_extrinsic_tvecs.append(world_to_zed_extrinsic_tvec)
-
+        world_to_wrists.append(world_to_wrist)
+        zed_mini_to_arucos.append(zed_mini_to_aruco)
+        zed_extrinsic_to_arucos.append(zed_extrinsic_to_aruco)
         H_chess_cams.append(zed_mini_to_aruco.as_frames("cb", "cam"))
         H_rob_worlds.append(H_rob_world.as_frames("rob", "world"))
         if(save_joints):
             saved_joints.append(ur.get_joints())
     if(save_joints):
         np.save(calibration_save_path + "/calibrate_extrinsics_trajectory.npy",np.array(saved_joints))
+      
+    H_cam_rob, H_chess_world = estimate_cam2rob(H_chess_cams, H_rob_worlds)
+    # remove the pre-specified wrist transform
+    H_cam_rob = H_WRIST * H_cam_rob
+    print("Estimated cam2rob:")
+    print(H_cam_rob)
+    print()
+    print(H_chess_world)
+    wrist_to_zed_mini = H_cam_rob
+    if "n" not in input("Save? [y]/n"):
+        H_cam_rob.to_frame = 'wrist'
+        H_cam_rob.from_frame = 'zed_mini'
+        H_cam_rob.save(calibration_save_path + "/wrist_to_zed_mini.tf")
+        
+    for(world_to_wrist,zed_mini_to_aruco,zed_extrinsic_to_aruco) in zip(world_to_wrists,zed_mini_to_arucos,zed_extrinsic_to_arucos):  
+        world_to_zed_extrinsic = world_to_wrist * wrist_to_zed_mini * zed_mini_to_aruco * zed_extrinsic_to_aruco.inverse()
+        world_to_zed_extrinsic_rvec,_ = cv2.Rodrigues(world_to_zed_extrinsic.rotation)
+        world_to_zed_extrinsic_tvec = world_to_zed_extrinsic.translation
+        world_to_zed_extrinsic_rvecs.append(world_to_zed_extrinsic_rvec)
+        world_to_zed_extrinsic_tvecs.append(world_to_zed_extrinsic_tvec)
     world_to_zed_extrinsic_translation = np.mean(np.array(world_to_zed_extrinsic_tvecs),axis=0)
     world_to_zed_extrinsic_rotation,_ = cv2.Rodrigues(np.mean(np.array(world_to_zed_extrinsic_rvecs),axis=0))
     world_to_zed_extrinsic_rigid_tf = RigidTransform(rotation=world_to_zed_extrinsic_rotation,translation=world_to_zed_extrinsic_translation,from_frame="zed_extrinsic",to_frame="world")
