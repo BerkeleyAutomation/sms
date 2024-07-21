@@ -35,7 +35,7 @@ from nerfstudio.viewer.viewer_elements import ViewerCheckbox
 from nerfstudio.models.base_model import ModelConfig
 from sms.data.utils.patch_embedding_dataloader import PatchEmbeddingDataloader
 # from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
-from sms.model.sms_gaussian_splatting import smsGaussianSplattingModelConfig
+from sms.model.sms_gaussian_splatting import smsGaussianSplattingModelConfig, SH2RGB
 # from sms.monodepth.zoedepth_network import ZoeDepthNetworkConfig
 from torch.cuda.amp.grad_scaler import GradScaler
 from torchvision.transforms.functional import resize
@@ -607,9 +607,9 @@ class smsdataPipeline(VanillaPipeline):
                     map_to_tensors[f"f_dc_{i}"] = shs_0[:, i, None]
                     
                 assert shs_0.shape[1] == 3
-                map_to_tensors[f"red"] = int(shs_0[:, 0] * 255)
-                map_to_tensors[f"green"] = int(shs_0[:, 1] * 255)
-                map_to_tensors[f"blue"] = int(shs_0[:, 2] * 255)
+                map_to_tensors[f"red"] = np.array(SH2RGB(shs_0[:, 0])*255).astype(np.uint8)
+                map_to_tensors[f"green"] = np.array(SH2RGB(shs_0[:, 1])*255).astype(np.uint8)
+                map_to_tensors[f"blue"] = np.array(SH2RGB(shs_0[:, 2])*255).astype(np.uint8)
 
                 # transpose(1, 2) was needed to match the sh order in Inria version
                 shs_rest = model.shs_rest.transpose(1, 2).contiguous().cpu().numpy()
