@@ -79,6 +79,11 @@ if __name__ == "__main__":
         points = np.loadtxt(f"{args.data}/means.txt")
         colors = np.loadtxt(f"{args.data}/colors.txt")#np.random.randint(0, 256, size=points.shape)
         pcd = o3d.geometry.PointCloud()
+    elif args.type == "path":
+        ply_filepath = args.data
+        pcd = o3d.io.read_point_cloud(ply_filepath)
+        points = np.asarray(pcd.points)
+        colors = np.asarray(pcd.colors)
     if args.crop_pc:
         points, colors = crop_pc(points, colors)
     if args.filter_noise:
@@ -103,6 +108,7 @@ if __name__ == "__main__":
     # server.add_point_cloud(name="table_center", points=table_center.reshape((1,3)), colors=np.array([255,0,0]).reshape((1,3)), point_size=0.05)
     server.add_point_cloud(name="pointcloud",points=points,colors=colors,point_size=0.001)
     input("save pointcloud?")
-    o3d.io.write_point_cloud(f"{args.data}/filtered_{args.type}_pc.ply",pcd)
+    if not args.type == "path":
+        o3d.io.write_point_cloud(f"{args.data}/filtered_{args.type}_pc.ply",pcd)
     input("Kill pointcloud?")
     exit()
