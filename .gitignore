@@ -28,3 +28,7 @@ sms/scripts/outputs/*
 sms/ur5_interface/ur5_interface/data/*
 sms/ur5_interface/ur5_interface/scripts/outputs/*
 outputs/*
+
+sms/tracking/__pycache__/*
+sms/ur5_interface/ur5_interface/outputs/*
+sms/ur5_interface/ur5_interface/scripts/results/*

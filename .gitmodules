@@ -1,3 +1,6 @@
 [submodule "sms/ur5_interface/ur5_interface/ur5py"]
 	path = sms/ur5_interface/ur5_interface/ur5py
 	url = https://github.com/BerkeleyAutomation/ur5py.git
+[submodule "sms/contact_graspnet"]
+	path = sms/contact_graspnet
+	url = https://github.com/NVlabs/contact_graspnet.git

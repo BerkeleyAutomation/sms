@@ -18,7 +18,6 @@
 #
 ########################################################################
 import sys
-sys.path.append('/home/lifelong/ur5_legs/RAFT-Stereo')
 import pyzed.sl as sl
 import math
 import os
@@ -32,7 +31,7 @@ from autolab_core import RigidTransform, Point, PointCloud
 from tqdm import tqdm
 from ur5py import UR5Robot
 
-from raftstereo.zed_stereo import Zed
+from ur5_interface.RAFT_Stereo.raftstereo.zed_stereo import Zed
 import pathlib
 
 # script_directory = pathlib.Path(__file__).parent.resolve()
@@ -107,7 +106,13 @@ def main():
     # mirror_ref.set_translation(sl.Translation(2.75, 4.0, 0))
 
     zed = Zed()
-
+    zed_focal_length = 520 # For 1280x720
+    if(abs(zed.f_ - zed_focal_length) > 10):
+        print("Trying other Zed camera")
+        zed = Zed()
+        if(abs(zed.f_ - zed_focal_length) > 10):
+            print("Please make sure Zed2 is plugged in")
+            exit()
     calibration_params = zed.cam.get_camera_information().camera_configuration.calibration_parameters
 
     f_x = calibration_params.left_cam.fx

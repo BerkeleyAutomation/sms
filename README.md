@@ -70,10 +70,32 @@ pip install ur_rtde==1.4.2
 pip install cowsay
 pip install opt-einsum
 pip install pyvista
+pip install autolab-core
 cd ~/sms/sms/ur5_interface/ur5_interface/ur5py
 pip install -e .
 cd ~/sms/sms/ur5_interface/ur5_interface/RAFT_Stereo
 pip install -e .
 cd ~/sms/sms/ur5_interface
 pip install -e .
+```
+## Contact Graspnet Python Installation
+```
+conda create --name contact_graspnet python=3.8
+conda activate contact_graspnet
+conda install -c conda-forge cudatoolkit=11.2
+conda install -c conda-forge cudnn=8.2
+pip install tensorflow==2.5 tensorflow-gpu==2.5
+pip install opencv-python-headless
+pip install pyyaml
+pip install pyrender
+pip install tqdm
+pip install mayavi
+pip install numpy==1.19.2
+pip install typing-extensions==3.7.4
+pip install trimesh==3.8.12
+pip install configobj==5.0.6
+pip install matplotlib==3.3.2
+pip install pyside2==5.11.0
+pip install scikit-image==0.19.0
+pip install open3d==0.10.0
 ```
