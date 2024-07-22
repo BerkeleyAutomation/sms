@@ -584,6 +584,9 @@ class smsdataPipeline(VanillaPipeline):
     def _update_export_options(self, checkbox: ViewerCheckbox):
         """Update the UI based on the export options"""
         self.z_export_options_visible_gaussians.set_hidden(not checkbox.value)
+    
+    def _export_clusters(self, button: ViewerButton):
+        """Export the cluster information to a .npy file"""
         
     def _export_visible_gaussians(self, button: ViewerButton):
         """Export the visible gaussians to a .ply file"""

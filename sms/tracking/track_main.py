@@ -36,8 +36,8 @@ def main(
         config_path: Path to the nerfstudio config file.
     """
     cfgpp = config_path.parent
-    ply = cfgpp + "/gaussians.ply" # For preloading the gaussians for pre-clustered objects instead of clustering interactively
-        
+    ply = cfgpp.joinpath("gaussians.ply") # For preloading the gaussians for pre-clustered objects instead of clustering interactively
+
     server = viser.ViserServer()
     wp.init()
     # Set up the camera.
@@ -103,7 +103,6 @@ def main(
     
     toad_opt = Optimizer( # Initialize the optimizer
         config_path,
-        ply,
         zed.get_K(),
         l.shape[1],
         l.shape[0], 
@@ -112,6 +111,7 @@ def main(
                 wxyz_xyz=np.array([*camera_frame.wxyz, *camera_frame.position])
             ).as_matrix()[None, :3, :]
         ).float(),
+        ply = ply,
     )
 
     @opt_init_handle.on_click # Btn callback -- initializes tracking optimization

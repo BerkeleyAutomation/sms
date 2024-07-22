@@ -56,11 +56,11 @@ class Optimizer:
     def __init__(
         self,
         config_path: Path,  # path to the nerfstudio config file
-        ply: Path,  # path to the object ply file
         K: np.ndarray,  # camera intrinsics
         width: int,  # camera width
         height: int,  # camera height
         init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
+        ply: Path = None,  # path to the object ply file
     ):
         if ply.exists():
             self.ply = ply
