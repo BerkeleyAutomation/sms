@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from PIL import Image
 from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
+import moviepy.editor as mpy
 
 da_image_processor = AutoImageProcessor.from_pretrained("LiheYoung/depth-anything-small-hf")
 da_model = AutoModelForDepthEstimation.from_pretrained("LiheYoung/depth-anything-small-hf")
@@ -53,3 +54,16 @@ def get_hand_mask(img: Union[torch.tensor,np.ndarray]):
     )[0]
     hand_mask = (seg_ids == hand_model.config.label2id['person']).float()
     return hand_mask
+
+def generate_videos(frames_dict, fps=30, config_path=None):
+    for key in frames_dict.keys():
+        frames = frames_dict[key]
+        if len(frames)>1:
+            frames = [f.detach().cpu().numpy()*255 for f in frames]
+        clip = mpy.ImageSequenceClip(frames, fps=fps)
+        if config_path is None:
+            clip.write_videofile(f"{key}.mp4", codec="libx264")
+        else:
+            clip.write_videofile(config_path+f"{key}.mp4", codec="libx264")
+    
+    

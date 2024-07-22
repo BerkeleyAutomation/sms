@@ -13,6 +13,8 @@ from nerfstudio.cameras.cameras import Cameras
 import warp as wp
 from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
+from sms.tracking.utils2 import generate_videos
+import moviepy.editor as mpy
 
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
@@ -147,98 +149,111 @@ def main(
     def _(_):
         return NotImplementedError
 
+    real_frames = []
+    rendered_rgb_frames = []
+    # rendered_depth_frames = []
+    # rendered_dino_frames = []
+    
     obj_label_list = [None for _ in range(toad_opt.num_groups)]
     while True: # Main tracking loop
-        if zed is not None:
-            start_time = time.time()
-            left, right, depth = zed.get_frame()
-            print("Got frame in ", time.time()-start_time)
-            start_time2 = time.time()
-            assert isinstance(toad_opt, Optimizer)
-            if toad_opt.initialized:
-                start_time3 = time.time()
-                toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
-                print("Set frame in ", time.time()-start_time3)
-                start_time5 = time.time()
-                n_opt_iters = 25
-                with zed.raft_lock:
-                    outputs = toad_opt.step_opt(niter=n_opt_iters)
-                print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
+        try:
+            if zed is not None:
+                start_time = time.time()
+                left, right, depth = zed.get_frame()
+                print("Got frame in ", time.time()-start_time)
+                start_time2 = time.time()
+                assert isinstance(toad_opt, Optimizer)
+                if toad_opt.initialized:
+                    start_time3 = time.time()
+                    toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
+                    print("Set frame in ", time.time()-start_time3)
+                    start_time5 = time.time()
+                    n_opt_iters = 25
+                    with zed.raft_lock:
+                        outputs = toad_opt.step_opt(niter=n_opt_iters)
+                    print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
-                # Add ZED img and GS render to viser
-                server.add_image(
-                    "cam/zed_left",
-                    left.cpu().detach().numpy(),
-                    render_width=left.shape[1]/2500,
-                    render_height=left.shape[0]/2500,
-                    position = (0.5, 0.5, 0.5),
-                    wxyz=(0, -0.7071068, -0.7071068, 0),
-                    visible=True
-                )
-                
-                server.add_image(
-                    "cam/gs_render",
-                    outputs["rgb"].cpu().detach().numpy(),
-                    render_width=left.shape[1]/2500,
-                    render_height=left.shape[0]/2500,
-                    position = (0.5, -0.5, 0.5),
-                    wxyz=(0, -0.7071068, -0.7071068, 0),
-                    visible=True
-                )
-                
-                tf_list = toad_opt.get_parts2world()
-                for idx, tf in enumerate(tf_list):
-                    server.add_frame(
-                        f"object/group_{idx}",
-                        position=tf.translation(),
-                        wxyz=tf.rotation().wxyz,
-                        show_axes=True,
-                        axes_length=0.05,
-                        axes_radius=.001
+                    # Add ZED img and GS render to viser
+                    server.add_image(
+                        "cam/zed_left",
+                        left.cpu().detach().numpy(),
+                        render_width=left.shape[1]/2500,
+                        render_height=left.shape[0]/2500,
+                        position = (0.5, 0.5, 0.5),
+                        wxyz=(0, -0.7071068, -0.7071068, 0),
+                        visible=True
                     )
-                    mesh = toad_opt.toad_object.meshes[idx]
-                    server.add_mesh_trimesh(
-                        f"object/group_{idx}/mesh",
-                        mesh=mesh,
+                    real_frames.append(left.cpu().detach().numpy())
+                    
+                    server.add_image(
+                        "cam/gs_render",
+                        outputs["rgb"].cpu().detach().numpy(),
+                        render_width=left.shape[1]/2500,
+                        render_height=left.shape[0]/2500,
+                        position = (0.5, -0.5, 0.5),
+                        wxyz=(0, -0.7071068, -0.7071068, 0),
+                        visible=True
                     )
-                    if idx == toad_opt.max_relevancy_label:
-                        obj_label_list[idx] = server.add_label(
-                        f"object/group_{idx}/label",
-                        text=toad_opt.max_relevancy_text,
-                        position = (0,0,0.05),
+                    rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+                    
+                    tf_list = toad_opt.get_parts2world()
+                    for idx, tf in enumerate(tf_list):
+                        server.add_frame(
+                            f"object/group_{idx}",
+                            position=tf.translation(),
+                            wxyz=tf.rotation().wxyz,
+                            show_axes=True,
+                            axes_length=0.05,
+                            axes_radius=.001
                         )
-                    else:
-                        if obj_label_list[idx] is not None:
-                            obj_label_list[idx].remove()
+                        mesh = toad_opt.toad_object.meshes[idx]
+                        server.add_mesh_trimesh(
+                            f"object/group_{idx}/mesh",
+                            mesh=mesh,
+                        )
+                        if idx == toad_opt.max_relevancy_label:
+                            obj_label_list[idx] = server.add_label(
+                            f"object/group_{idx}/label",
+                            text=toad_opt.max_relevancy_text,
+                            position = (0,0,0.05),
+                            )
+                        else:
+                            if obj_label_list[idx] is not None:
+                                obj_label_list[idx].remove()
+                            
                         
                     
-                
-                    # grasps = toad_opt.toad_object.grasps[idx] # [N_grasps, 7]
-                    # grasp_mesh = toad_opt.toad_object.grasp_axis_mesh()
-                    # for j, grasp in enumerate(grasps):
-                    #     server.add_mesh_trimesh(
-                    #         f"camera/object/group_{idx}/grasp_{j}",
-                    #         grasp_mesh,
-                    #         position=grasp[:3].cpu().numpy(),
-                    #         wxyz=grasp[3:].cpu().numpy(),
-                    #     )
+                        # grasps = toad_opt.toad_object.grasps[idx] # [N_grasps, 7]
+                        # grasp_mesh = toad_opt.toad_object.grasp_axis_mesh()
+                        # for j, grasp in enumerate(grasps):
+                        #     server.add_mesh_trimesh(
+                        #         f"camera/object/group_{idx}/grasp_{j}",
+                        #         grasp_mesh,
+                        #         position=grasp[:3].cpu().numpy(),
+                        #         wxyz=grasp[3:].cpu().numpy(),
+                        #     )
 
-            # Visualize pointcloud.
-            start_time4 = time.time()
-            K = torch.from_numpy(zed.get_K()).float().cuda()
-            assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
-            points, colors = Zed.project_depth(left, depth, K, depth_threshold=0.5, subsample=6)
-            server.add_point_cloud(
-                "camera/points",
-                points=points,
-                colors=colors,
-                point_size=0.001,
-            )
-            print("Visualized pointcloud in ", time.time()-start_time4)
-            print("Opt in ", time.time()-start_time2)
+                # Visualize pointcloud.
+                start_time4 = time.time()
+                K = torch.from_numpy(zed.get_K()).float().cuda()
+                assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
+                points, colors = Zed.project_depth(left, depth, K, depth_threshold=0.5, subsample=6)
+                server.add_point_cloud(
+                    "camera/points",
+                    points=points,
+                    colors=colors,
+                    point_size=0.001,
+                )
+                print("Visualized pointcloud in ", time.time()-start_time4)
+                print("Opt in ", time.time()-start_time2)
 
-        else:
-            time.sleep(1)
+            else:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            # Generate videos from the frames
+            frames_dict = {"real_frames": real_frames, 
+                           "rendered_rgb": rendered_rgb_frames}
+            generate_videos(frames_dict, config_path=config_path)
 
 
 if __name__ == "__main__":
