@@ -204,7 +204,7 @@ def main(
                     if idx == toad_opt.max_relevancy_label:
                         obj_label_list[idx] = server.add_label(
                         f"object/group_{idx}/label",
-                        text=text_handle.value,
+                        text=toad_opt.max_relevancy_text,
                         position = (0,0,0.05),
                         )
                     else:
