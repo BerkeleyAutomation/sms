@@ -56,16 +56,18 @@ class Optimizer:
     def __init__(
         self,
         config_path: Path,  # path to the nerfstudio config file
-        K: np.ndarray,  # camera intrinsics
-        width: int,  # camera width
-        height: int,  # camera height
-        init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
-        ply: Path = None,  # path to the object ply file
+        # K: np.ndarray,  # camera intrinsics
+        # width: int,  # camera width
+        # height: int,  # camera height
+        # init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
     ):
-        if ply.exists():
-            self.ply = ply
+        clusters = config_path.parent.parent.parent.joinpath("clusters.npy") # For preloading the cluster info for pre-clustered objects instead of clustering interactively
+        print("clusters file", clusters)
+        if not clusters.exists():
+            print(f"clusters.npy file does not exist. \nProceed with interactive clustering.")
+            self.cluster_from_file = None
         else:
-            print(f"PLY file {ply} does not exist. Proceed with interactive clustering.")
+            self.cluster_from_file = np.load(clusters, allow_pickle=True)
         
         # Load the smsdataPipeline.
         train_config, self.pipeline, _, _ = eval_setup(config_path)
@@ -107,7 +109,7 @@ class Optimizer:
             cache_path=dino_cache_path,
             use_denoiser=False,
         )
-        
+        '''
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)
 
@@ -138,6 +140,7 @@ class Optimizer:
         
         # Set up the optimizer.
         self.cam2world_ns = cam2world_ns
+        '''
         self.dataset_scale = dataset_scale
 
         self.orig_means = self.pipeline.model.gauss_params["means"].detach().clone()
@@ -181,30 +184,48 @@ class Optimizer:
 
     def _setup_crops_and_groups(self) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """Set up the crops and groups for the optimizer, interactively."""
-        cluster_labels = None
-        try:
-            # self.pipeline.load_state()
-            if getattr(self.pipeline.model, "best_scales") is None:
-                raise TypeError
-            _ = input("Model populated (interactively crop and press enter to continue)")
-            self.keep_inds = self.pipeline.keep_inds
-            cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
-        except TypeError:
-            print("Model not populated yet. Please wait...")
-            # Wait for the user to set up the crops and groups.
-            while getattr(self.pipeline.model, "best_scales") is None:
-                time.sleep(0.1)
-            # while True:
-            #     time.sleep(0.1)
-            _ = input("Model populated (interactively crop and press enter to continue)")
-            self.keep_inds = self.pipeline.keep_inds
-            
+        if self.cluster_from_file is not None: # load cached cluster file, otherwise, interactively cluster
+            self.keep_inds = self.cluster_from_file[1]
+            self.pipeline.model.cluster_labels = self.cluster_from_file[0]
             keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
             keep_inds_mask[self.keep_inds] = 1
             keep_inds_mask = keep_inds_mask.to(torch.bool)
             
             cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
             cluster_labels_global = self.pipeline.model.cluster_labels.to(torch.int32)
+            self.pipeline._queue_state()
+            prev_state = self.pipeline.state_stack[-1]
+            for name in self.pipeline.model.gauss_params.keys():
+                self.pipeline.model.gauss_params[name] = prev_state[name][self.keep_inds]
+        else:
+            try:
+                if getattr(self.pipeline.model, "best_scales") is None:
+                    raise TypeError
+                _ = input("Model populated (interactively crop and press enter to continue)")
+                self.keep_inds = self.pipeline.keep_inds
+                
+                keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
+                keep_inds_mask[self.keep_inds] = 1
+                keep_inds_mask = keep_inds_mask.to(torch.bool)
+                
+                cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
+                cluster_labels_global = self.pipeline.model.cluster_labels.to(torch.int32)
+            except TypeError:
+                print("Model not populated yet. Please wait...")
+                # Wait for the user to set up the crops and groups.
+                while getattr(self.pipeline.model, "best_scales") is None:
+                    time.sleep(0.1)
+                # while True:
+                #     time.sleep(0.1)
+                _ = input("Model populated (interactively crop and press enter to continue)")
+                self.keep_inds = self.pipeline.keep_inds
+                
+                keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
+                keep_inds_mask[self.keep_inds] = 1
+                keep_inds_mask = keep_inds_mask.to(torch.bool)
+                
+                cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
+                cluster_labels_global = self.pipeline.model.cluster_labels.to(torch.int32)
 
         mapping, cluster_labels_keep = torch.unique(cluster_labels, return_inverse=True)
         group_masks = [(cid == cluster_labels_keep).cuda() for cid in range(cluster_labels_keep.max().item() + 1)]

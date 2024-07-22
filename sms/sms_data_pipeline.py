@@ -244,6 +244,12 @@ class smsdataPipeline(VanillaPipeline):
             visible=False,
             cb_hook=self._export_visible_gaussians
             )
+        self.z_export_options_cluster_labels = ViewerButton(
+            name="Export Cluster",
+            visible=False,
+            cb_hook=self._export_clusters
+            )
+
 
     # this only calcualtes the features for the given image
     def add_image(
@@ -347,6 +353,8 @@ class smsdataPipeline(VanillaPipeline):
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
         self.keep_inds = keep_inds
+        self._export_clusters(None)
+        self.z_export_options_cluster_labels.visible = True
 
     def _crop_to_click(self, button: ViewerButton):
         """Crop to click location"""
@@ -587,7 +595,14 @@ class smsdataPipeline(VanillaPipeline):
     
     def _export_clusters(self, button: ViewerButton):
         """Export the cluster information to a .npy file"""
+        output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
+        filename = Path(output_dir) / f"clusters.npy"
         
+        if self.model.cluster_labels is not None and self.keep_inds is not None:
+            np.save(filename, np.array([self.model.cluster_labels, self.keep_inds], dtype=object))
+        else:
+            print("No cluster labels to export")
+            
     def _export_visible_gaussians(self, button: ViewerButton):
         """Export the visible gaussians to a .ply file"""
         # location to save
