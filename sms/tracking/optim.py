@@ -84,9 +84,11 @@ class Optimizer:
 
         self.keep_inds = None
 
-        group_labels, group_masks = self._setup_crops_and_groups()
+        self.group_labels, self.group_masks, self.group_masks_global = self._setup_crops_and_groups()
+        self.max_relevancy_label = None
+        self.max_relevancy_text = None
 
-        self.num_groups = len(group_masks)
+        self.num_groups = len(self.group_masks)
         
         # Init DINO dataloader for 'Frames' extractor_fn
         cache_dir = config_path.parent.parent.parent
@@ -130,7 +132,6 @@ class Optimizer:
         
         # Set up the optimizer.
         self.cam2world_ns = cam2world_ns
-        self.group_masks, self.group_labels = group_masks, group_labels
         self.dataset_scale = dataset_scale
 
         self.orig_means = self.pipeline.model.gauss_params["means"].detach().clone()
@@ -138,8 +139,8 @@ class Optimizer:
 
         self.optimizer = RigidGroupOptimizer(
             self.pipeline.model,
-            group_masks=group_masks,
-            group_labels=group_labels,
+            group_masks=self.group_masks,
+            group_labels=self.group_labels,
             dataset_scale=dataset_scale,
             render_lock=self.viewer_ns.train_lock,
         )
@@ -187,15 +188,24 @@ class Optimizer:
             # Wait for the user to set up the crops and groups.
             while getattr(self.pipeline.model, "best_scales") is None:
                 time.sleep(0.1)
-            while True:
-                time.sleep(0.1)
+            # while True:
+            #     time.sleep(0.1)
             _ = input("Model populated (interactively crop and press enter to continue)")
             self.keep_inds = self.pipeline.keep_inds
+            
+            keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
+            keep_inds_mask[self.keep_inds] = 1
+            keep_inds_mask = keep_inds_mask.to(torch.bool)
+            
             cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
+            cluster_labels_global = self.pipeline.model.cluster_labels.to(torch.int32)
 
-        _, cluster_labels = torch.unique(cluster_labels, return_inverse=True)
-        group_masks = [(cid == cluster_labels).cuda() for cid in range(cluster_labels.max().item() + 1)]
-        return cluster_labels.int().cuda(), group_masks
+        mapping, cluster_labels_keep = torch.unique(cluster_labels, return_inverse=True)
+        group_masks = [(cid == cluster_labels_keep).cuda() for cid in range(cluster_labels_keep.max().item() + 1)]
+        
+        group_masks_global = [((cid == cluster_labels_global) & keep_inds_mask).cuda() for cid in mapping]
+        
+        return cluster_labels_keep.int().cuda(), group_masks, group_masks_global
 
     def set_frame(self, rgb, ns_camera, depth) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
@@ -210,7 +220,7 @@ class Optimizer:
         Also updates `initialized` to `True`."""
         # retval only matters for visualization
         start = time.time()
-        xs, ys, renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=7)
+        renders = self.optimizer.initialize_obj_pose(render=True,n_seeds=7)
         print(f"Time taken for init (pose opt): {time.time() - start:.2f} s")
 
         start = time.time()
@@ -220,7 +230,11 @@ class Optimizer:
             out_clip = mpy.ImageSequenceClip(renders, fps=30)  
             out_clip.write_videofile("test_camopt.mp4")
         print(f"Time taken for init (video): {time.time() - start:.2f} s")
-
+        
+        # Assert there are no nans in part_deltas
+        assert not torch.isnan(self.optimizer.part_deltas).any().item()
+        if torch.isnan(self.optimizer.part_deltas).any().item():
+            exit()
         self.initialized = True
 
     def step_opt(self,niter):
@@ -296,13 +310,11 @@ class Optimizer:
 
         return hands
     
-    def get_most_relevant_object(self, clip_encoder: OpenCLIPNetwork) -> int:
-        group_labels = self.optimizer.group_labels
-        group_masks = self.optimizer.group_masks
-        
+    def get_clip_relevancy(self, clip_encoder: OpenCLIPNetwork) -> int:
+
         init_means = self.optimizer.init_means # (N, 3)
         distances, indicies = self.optimizer.sms_model.k_nearest_sklearn(init_means, 3, True)
-        distances = torch.from_numpy(distances).to(self.device)
+        distances = torch.from_numpy(distances).to(self.optimizer.sms_model.device)
         indicies = torch.from_numpy(indicies).view(-1)
         weights = torch.sigmoid(self.optimizer.init_opacities[indicies].view(-1, 4))
         weights = torch.nn.Softmax(dim=-1)(weights)
@@ -314,10 +326,9 @@ class Optimizer:
         hash_encoding = hash_encoding.sum(dim=1)
         
         clip_feats = self.optimizer.sms_model.gaussian_field.get_clip_outputs_from_feature(hash_encoding, 
-            self.optimizer.sms_model.best_scales[0].to(self.device) * torch.ones(self.num_points, 1, device=self.device)) # (N, 96) -> (N, 512)
+            self.optimizer.sms_model.best_scales[0].to(self.optimizer.sms_model.device) * 
+            torch.ones(self.optimizer.sms_model.num_points, 1, device=self.optimizer.sms_model.device)) # (N, 96) -> (N, 512)
         
-        relevancy = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.num_points, -1)
-            
-        import pdb; pdb.set_trace()
-        # for mask in group_masks:
+        relevancy = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.optimizer.sms_model.num_points, -1)
+        return relevancy
     

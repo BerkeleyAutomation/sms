@@ -16,7 +16,7 @@ from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
-# WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
+WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
 
 def clear_tcp(robot):
     tool_to_wrist = RigidTransform()
@@ -26,7 +26,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl_and_tape1/sms-data/2024-07-20_221600/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/drill_and_spool1/sms-data/2024-07-21_155718/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -48,18 +48,10 @@ def main(
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
     query_handle = server.add_gui_button("Query", disabled=True) # Button for querying the object once the user has inputted the query
-    # import pdb; pdb.set_trace()
-    # try:
+    generate_grasps_handle = server.add_gui_button("Generate Grasps on Query", disabled=True) # Button for querying the object once the user has inputted the query
+
     zed = Zed() # Initialize ZED
     
-    zed_mini_focal_length = 730 
-    if(abs(zed.f_ - zed_mini_focal_length) > 10): # Check if the ZED connected is ZED mini or ZED2
-        print("Accidentally connected to wrong Zed. Trying again")
-        zed = Zed()
-        if(abs(zed.f_ - zed_mini_focal_length) > 10):
-            print("Make sure just Zed mini is plugged in")
-            exit()
-
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
     
@@ -75,10 +67,19 @@ def main(
         
     robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
     
+    zed_mini_focal_length = 730 
+    if(abs(zed.f_ - zed_mini_focal_length) > 10): # Check if the ZED connected is ZED mini or ZED2
+        print("Connected to Zed2")
+        zed.zed_mesh = zed.zed2_mesh
+        camera_tf = WORLD_TO_ZED2
+    else:
+        print("Connected to ZedMini")
+        zed.zed_mesh = zed.zedM_mesh
+        camera_tf = proper_world_to_cam
+            
     # Visualize the camera.
-    # camera_tf = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_ZM.tf")
-    camera_tf = proper_world_to_cam
-    
+
+        
     camera_frame = server.add_frame(
         "camera",
         position=camera_tf.translation,  # rough alignment.
@@ -126,13 +127,27 @@ def main(
     def _(_):
         # TODO: Query for most relevant object
         text_positives = text_handle.value
-        assert isinstance(text_positives, list)
+        
         clip_encoder.set_positives(text_positives.split(";"))
-        
-        obj_id = toad_opt.get_most_relevant_object(clip_encoder)
-            
-        
-        
+        if len(clip_encoder.positives) > 0:
+            relevancy = toad_opt.get_clip_relevancy(clip_encoder)
+            group_masks = toad_opt.optimizer.group_masks
+
+            relevancy_avg = []
+            for mask in group_masks:
+                relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
+            relevancy_avg = torch.tensor(relevancy_avg)
+            toad_opt.max_relevancy_label = torch.argmax(relevancy_avg).item()
+            toad_opt.max_relevancy_text = text_positives
+            generate_grasps_handle.disabled = False
+        else:
+            print("No language query provided")
+    
+    @generate_grasps_handle.on_click
+    def _(_):
+        return NotImplementedError
+
+    obj_label_list = [None for _ in range(toad_opt.num_groups)]
     while True: # Main tracking loop
         if zed is not None:
             start_time = time.time()
@@ -186,6 +201,18 @@ def main(
                         f"object/group_{idx}/mesh",
                         mesh=mesh,
                     )
+                    if idx == toad_opt.max_relevancy_label:
+                        obj_label_list[idx] = server.add_label(
+                        f"object/group_{idx}/label",
+                        text=text_handle.value,
+                        position = (0,0,0.05),
+                        )
+                    else:
+                        if obj_label_list[idx] is not None:
+                            obj_label_list[idx].remove()
+                        
+                    
+                
                     # grasps = toad_opt.toad_object.grasps[idx] # [N_grasps, 7]
                     # grasp_mesh = toad_opt.toad_object.grasp_axis_mesh()
                     # for j, grasp in enumerate(grasps):

@@ -13,6 +13,14 @@ from pathlib import Path
 import tyro
 import pickle as pkl
 
+import os
+import sys
+
+dir_path = os.path.dirname(os.path.realpath(__file__))
+grasp_ply_filepath = os.path.join(dir_path,'../ur5_interface/ur5_interface/scripts')
+sys.path.append(grasp_ply_filepath)
+# from grasp_ply_arnav import get_grasps
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class ToadObject:
     """
@@ -88,6 +96,13 @@ class ToadObject:
             _meshes=part_mesh_list,
         )
 
+    def generate_grasps(
+        points: np.ndarray, # [N, 3]
+        color: np.ndarray, # [N, 3]
+        group_masks: np.ndarray # [num_groups, N]
+    ):
+      return NotImplementedError  
+    
     @staticmethod
     def dummy_object() -> ToadObject:
         cylinder_1 = trimesh.creation.cylinder(radius=0.01, height=0.1, sections=20)

@@ -126,49 +126,18 @@ class RigidGroupOptimizer:
                     with torch.no_grad():
                         dig_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
                     renders.append(dig_outputs["rgb"].detach())
-                    # import pdb; pdb.set_trace()
-                    # return dig_outputs, loss, whole_pose_adj.data.detach()
             self.is_initialized = True
             return loss, whole_pose_adj.data.detach()
 
         best_loss = float("inf")
 
-        def find_pixel(n_gauss=10000):
-            """
-            returns the y,x coord and box size of the object in the video frame, based on the dino features
-            and mutual nearest neighbors
-            """
-            samps = torch.randint(
-                0, self.sms_model.num_points, (n_gauss,), device="cuda"
-            )
-            nn_inputs = self.sms_model.gauss_params["dino_feats"][samps]
-            # dino_feats = self.sms_model.nn(nn_inputs.half()).float()  # NxC
-            dino_feats = self.sms_model.nn(nn_inputs)  # NxC
-            downsamp_factor = 4
-            downsamp_frame_feats = self.frame.dino_feats[
-                ::downsamp_factor, ::downsamp_factor, :
-            ]
-            frame_feats = downsamp_frame_feats.reshape(
-                -1, downsamp_frame_feats.shape[-1]
-            )  # (H*W) x C
-            _, match_ids = mnn_matcher(dino_feats, frame_feats)
-            x, y = (match_ids % (self.frame.camera.width / downsamp_factor)).float(), (
-                match_ids // (self.frame.camera.width / downsamp_factor)
-            ).float()
-            x, y = x * downsamp_factor, y * downsamp_factor
-            return y, x, torch.tensor([y.mean().item(), x.mean().item()], device="cuda")
+        # obj_centroid = self.init_p2w_7vec[:,:3]
 
-        ys, xs, best_pix = find_pixel()
-        obj_centroid = self.sms_model.means.mean(dim=0, keepdim=True)  # 1x3 # TODO: Turn this into per object centroid using self.init_p2w
-        ray = self.frame.camera.generate_rays(0, best_pix)
-        dist = 1.0
-        point = ray.origins + ray.directions * dist
         for z_rot in np.linspace(0, np.pi * 2, n_seeds):
-            whole_pose_adj = torch.zeros(1, 7, dtype=torch.float32, device="cuda")
+            whole_pose_adj = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
             # x y z qw qx qy qz
-            # (x,y,z) = something along ray - centroid
             quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
-            whole_pose_adj[:, :3] = point - obj_centroid
+            whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
             whole_pose_adj[:, 3:] = quat
             loss, final_poses = try_opt(whole_pose_adj, niter, False, render)
             if loss is not None and loss < best_loss:
@@ -185,11 +154,9 @@ class RigidGroupOptimizer:
         self.part_deltas = torch.nn.Parameter(self.part_deltas)
         self.part_deltas.requires_grad_(True)
         self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.pose_lr)
-        # if self.do_obj_optim:
-        #     self.part_deltas.requires_grad_(True)
-            # self.obj_optimizer = torch.optim.Adam([self.part_deltas], lr=self.pose_lr)
-        # import pdb; pdb.set_trace()
-        return xs, ys, renders
+
+        self.prev_part_deltas = best_poses
+        return renders
     
     @property
     def objreg2objinit(self):
@@ -362,6 +329,7 @@ class RigidGroupOptimizer:
             with torch.no_grad():
                 self.part_deltas[:, 3:] = self.part_deltas[:, 3:] / self.part_deltas[:, 3:].norm(dim=1, keepdim=True)
                 # self.obj_delta[0, 3:] = self.obj_delta[0, 3:] / self.obj_delta[0, 3:].norm()
+                self.prev_part_deltas = self.part_deltas.detach().clone()
             tape = wp.Tape()
             self.part_optimizer.zero_grad()
             # if self.do_obj_optim:
@@ -382,6 +350,15 @@ class RigidGroupOptimizer:
             #     obj_scheduler.step()
         # reset lr
         self.part_optimizer.param_groups[0]["lr"] = self.pose_lr
+        
+        # # If tracking results in nan, propogate previous pose
+        # if torch.isnan(self.part_deltas).any().item():
+        #     for i, p_deltas in enumerate(self.part_deltas):
+        #         if torch.isnan(p_deltas).any().item():
+        #             self.part_deltas[i] = self.prev_part_deltas[i]
+        #     self.part_deltas = torch.nn.Parameter(self.part_deltas)
+        #     self.part_deltas.requires_grad_(True)
+        
         with torch.no_grad():
             with self.render_lock:
                 self.sms_model.eval()

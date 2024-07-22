@@ -231,12 +231,19 @@ class Zed():
         # left_cx = self.get_K(cam='left')[0,2]
         # right_cx = self.get_K(cam='right')[0,2]
         # self.cx_diff = (right_cx-left_cx)
+        
+        self.cam_type = 'ZEDMini'
+        
 
+        
         # For visualiation.
-        zed_path = Path(__file__).parent / Path("data/ZEDM.stl")
-        zed_mesh = trimesh.load(str(zed_path))
-        assert isinstance(zed_mesh, trimesh.Trimesh)
-        self.zed_mesh = zed_mesh
+        
+        zedM_path = Path(__file__).parent / Path("data/ZEDM.stl")
+        zed2_path = Path(__file__).parent / Path("data/ZED2.stl")
+        self.zedM_mesh = trimesh.load(str(zedM_path))
+        self.zed2_mesh = trimesh.load(str(zed2_path))
+        # assert isinstance(zed_mesh, trimesh.Trimesh)
+        self.zed_mesh = self.zed2_mesh
         self.cam_to_zed = RigidTransform(
             rotation=RigidTransform.quaternion_from_axis_angle(
                 np.array([1, 0, 0]) * (np.pi / 2)
