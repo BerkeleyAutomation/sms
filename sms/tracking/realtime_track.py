@@ -28,7 +28,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/drill_and_spool1/sms-data/2024-07-21_155718/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_22_green_tape_solo/sms-data/2024-07-22_163302/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
