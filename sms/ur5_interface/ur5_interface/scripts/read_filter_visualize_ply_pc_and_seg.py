@@ -2,7 +2,9 @@ import open3d as o3d
 import numpy as np
 import viser
 from sklearn.cluster import DBSCAN
-from scipy.spatial import ConvexHull
+import json
+
+bounding_box_filepath = "/home/lifelong/sms/sms/data/utils/Detic/2024_07_22_green_tape_bounding_cube/table_bounding_cube.json"
 
 def filter_noise(points, colors):
     eps = 0.005  # Maximum distance between two samples to be considered as neighbors
@@ -17,16 +19,12 @@ def filter_noise(points, colors):
     filtered_colors = colors[labels != -1]
     return filtered_pointcloud, filtered_colors
 
-def crop_pc(points, colors):
-    table_center = np.array([0.48666, -0.0104, -0.120])
-    # distances = np.linalg.norm(points - table_center, axis=1)
-    # idxs = np.where(distances < 0.5)[0]
-    
-    x_min_world,x_max_world,y_min_world,y_max_world = 0.258, 0.65, -0.366, 0.3452
-    z_min_world,z_max_world = -0.12, 0.134 
-    idxs = np.where((points[:, 0] >= x_min_world) & (points[:, 0] <= x_max_world) & (points[:, 1] >= y_min_world) & (points[:, 1] <= y_max_world) & (points[:, 2] >= z_min_world) & (points[:, 2] <= z_max_world))[0]
-    points = points[idxs]
-    colors = colors[idxs]
+def get_table_pc(points, colors):
+    with open(bounding_box_filepath, 'r') as json_file:
+        bounding_box_dict = json.load(json_file)
+    cropped_idxs = (points[:, 0] >= bounding_box_dict['x_min']) & (points[:, 0] <= bounding_box_dict['x_max']) & (points[:, 1] >= bounding_box_dict['y_min']) & (points[:, 1] <= bounding_box_dict['y_max']) & (points[:, 2] >= bounding_box_dict['z_min']) & (points[:, 2] <= bounding_box_dict['z_max'])
+    points = points[cropped_idxs]
+    colors = colors[cropped_idxs]
     return points, colors
 
 # def isolateTable(points):
@@ -88,14 +86,15 @@ if __name__ == "__main__":
         points = np.asarray(pcd.points)
         colors = np.asarray(pcd.colors)
     if args.crop_pc:
-        points, colors = crop_pc(points, colors)
+        points, colors = get_table_pc(points, colors)
+        server.add_point_cloud(name="pointcloud_table",points=points,colors=colors,point_size=0.001)
     if args.filter_noise:
         # server.add_point_cloud(name="table_center", points=table_center.reshape((1,3)), colors=np.array([255,0,0]).reshape((1,3)), point_size=0.05)
         points, colors = filter_noise(points, colors)
         server.add_point_cloud(name="pointcloud_filtered",points=points,colors=colors,point_size=0.001)
     
-    pcd.points = o3d.utility.Vector3dVector(points)
-    pcd.colors = o3d.utility.Vector3dVector(colors)
+    
+    breakpoint()
     
     # gs pointcloud is too sparse so we need to densify it
     if args.type == "gs":

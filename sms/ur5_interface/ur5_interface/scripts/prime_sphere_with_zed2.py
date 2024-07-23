@@ -599,6 +599,18 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     pcd.points = o3d.utility.Vector3dVector(final_pointcloud)
     pcd.colors = o3d.utility.Vector3dVector(final_rgbcloud / 255.)
     o3d.io.write_point_cloud(os.path.join(save_dirs['poses'],'..','sparse_pc.ply'),pcd)
+    table_bounding_cube = {
+        'x_min':x_min_world,
+        'x_max':x_max_world,
+        'y_min':y_min_world,
+        'y_max':y_max_world,
+        'z_min':z_min_world,
+        'z_max':z_max_world
+    }
+    import pdb
+    pdb.set_trace()
+    with open(os.path.join(save_dirs['poses'],'..','table_bounding_cube.json'), 'w') as json_file:
+        json.dump(table_bounding_cube, json_file, indent=4)
     # collection_finish_joints = np.array(robot.get_joints())
     # collection_finish_joints[-1] = -np.pi / 2
     # collection_finish_joints[-2] = np.pi / 2

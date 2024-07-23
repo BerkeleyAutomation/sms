@@ -13,6 +13,7 @@ from nerfstudio.cameras.cameras import Cameras
 import warp as wp
 from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
+from sms.model.sms_gaussian_splatting import smsGaussianSplattingModelConfig, SH2RGB
 from toad_object_karim import ToadObject
 
 
@@ -157,7 +158,7 @@ def main(
         points = toad_opt.pipeline.state_stack[0]["means"].detach().cpu().numpy()
         features_dc = toad_opt.pipeline.state_stack[0]["features_dc"].detach().cpu().numpy()
         # TODO need to convert from SH2RGB
-        colors = ...
+        colors = SH2RGB(features_dc)
         group_masks = np.array([group_mask.detach().cpu().numpy() for group_mask in toad_opt.group_masks_global])
         obj_idx = toad_opt.max_relevancy_label #  For drill spool scene: 0 for drill, 1 for wire spool
         ToadObject.generate_grasps(points, colors, group_masks, obj_idx)

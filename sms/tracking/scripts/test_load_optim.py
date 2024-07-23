@@ -4,7 +4,7 @@ import torch
 import viser.transforms as vtf
 import numpy as np
 
-CKPT = '/home/lifelong/sms/sms/data/utils/Detic/outputs/block_tape/sms-data/2024-07-16_160230/config.yml'
+CKPT = '/home/yujustin/Desktop/sms/sms/data/utils/Detic/outputs/drill_and_spool1/sms-data/2024-07-21_025802/config.yml'
 def main(
     config_path: Path = Path(CKPT),
     ):

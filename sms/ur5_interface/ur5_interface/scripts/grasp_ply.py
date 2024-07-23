@@ -24,15 +24,19 @@ robot.set_tcp(tool_to_wrist)
 home_joints = np.array([0.3103832006454468, -1.636097256337301, -0.5523660818683069, -2.4390090147601526, 1.524283766746521, 0.29816189408302307])
 robot.move_joint(home_joints,vel=1.0,acc=0.1)
     
-ply_filepath = "/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl_and_tape1/prime_gaussians.ply"
+segmented_ply_filepath = "/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_22_green_tape_bowl/prime_seg_gaussians.ply"
+full_ply_filepath = "/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_22_green_tape_bowl/prime_full_gaussians.ply"
+bounding_box_filepath = "/home/lifelong/sms/sms/data/utils/Detic/2024_07_22_green_tape_bowl/table_bounding_cube.json"
 parser = argparse.ArgumentParser()
 parser.add_argument('--ckpt_dir', default=contact_graspnet_path + '/../checkpoints/scene_test_2048_bs3_hor_sigma_001', help='Log dir [default: checkpoints/scene_test_2048_bs3_hor_sigma_001]')
-parser.add_argument('--np_path', default=ply_filepath, help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+parser.add_argument('--seg_np_path', default=segmented_ply_filepath, help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+parser.add_argument('--full_np_path', default=full_ply_filepath, help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+parser.add_argument('--pc_bounding_box_path', default=bounding_box_filepath, help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
 parser.add_argument('--png_path', default='', help='Input data: depth map png in meters')
 parser.add_argument('--K', default=None, help='Flat Camera Matrix, pass as "[fx, 0, cx, 0, fy, cy, 0, 0 ,1]"')
 parser.add_argument('--z_range', default=[0.2,1.8], help='Z value threshold to crop the input point cloud')
 parser.add_argument('--local_regions', action='store_true', default=False, help='Crop 3D local regions around given segments.')
-parser.add_argument('--filter_grasps', action='store_true', default=False,  help='Filter grasp contacts according to segmap.')
+parser.add_argument('--filter_grasps', action='store_true', default=True,  help='Filter grasp contacts according to segmap.')
 parser.add_argument('--skip_border_objects', action='store_true', default=False,  help='When extracting local_regions, ignore segments at depth map boundary.')
 parser.add_argument('--forward_passes', type=int, default=10,  help='Run multiple parallel forward passes to mesh_utils more potential contact points.')
 parser.add_argument('--segmap_id', type=int, default=0,  help='Only return grasps of the given object id')
@@ -44,12 +48,12 @@ global_config = config_utils.load_config(FLAGS.ckpt_dir, batch_size=FLAGS.forwar
 print(str(global_config))
 print('pid: %s'%(str(os.getpid())))
 
-pred_grasps_cam,scores,pc_full,pc_colors = inference(global_config, FLAGS.ckpt_dir, FLAGS.np_path if not FLAGS.png_path else FLAGS.png_path, z_range=eval(str(FLAGS.z_range)),
+pred_grasps_cam,scores,pc_full,pc_colors = inference(global_config, FLAGS.ckpt_dir, FLAGS.seg_np_path if not FLAGS.png_path else FLAGS.png_path, FLAGS.full_np_path,FLAGS.pc_bounding_box_path, z_range=eval(str(FLAGS.z_range)),
             K=FLAGS.K, local_regions=FLAGS.local_regions, filter_grasps=FLAGS.filter_grasps, segmap_id=FLAGS.segmap_id, 
-            forward_passes=FLAGS.forward_passes, skip_border_objects=FLAGS.skip_border_objects,debug=False)
+            forward_passes=FLAGS.forward_passes, skip_border_objects=FLAGS.skip_border_objects,debug=True)
 
-best_scores = {-1:scores[-1][np.argsort(scores[-1])[::-1]][:1]}
-best_grasps = {-1:pred_grasps_cam[-1][np.argsort(scores[-1])[::-1]][:1]}
+best_scores = {0:scores[0][np.argsort(scores[0])[::-1]][:1]}
+best_grasps = {0:pred_grasps_cam[0][np.argsort(scores[0])[::-1]][:1]}
 world_to_cam_tf = np.array([[0,-1,0,0],
                                     [-1,0,0,0],
                                     [0,0,-1,0],
@@ -67,14 +71,11 @@ point_cloud_cam.colors = o3d.utility.Vector3dVector(pc_colors)
 # Step 2: Visualize the point cloud
 coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
 grasp_point = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-grasp_point.transform(best_grasps[-1][0])
+grasp_point.transform(best_grasps[0][0])
 o3d.visualization.draw_geometries([point_cloud_cam,coordinate_frame,grasp_point])
 
 ones = np.ones((pc_full.shape[0],1))
-world_to_cam_tf = np.array([[0,-1,0,0],
-                            [-1,0,0,0],
-                            [0,0,-1,0],
-                            [0,0,0,1]])
+world_to_cam_tf = RigidTransform.load('/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf').matrix
 homogenous_points_cam = np.hstack((pc_full,ones))
 homogenous_points_world = world_to_cam_tf @ homogenous_points_cam.T
 points_world = homogenous_points_world[:3,:] / homogenous_points_world[3,:][np.newaxis,:]
@@ -90,7 +91,7 @@ panda_grasp_point_to_robotiq_grasp_point = np.array([[1,0,0,0],
                                                      [0,1,0,0],
                                                      [0,0,1,-0.06],
                                                      [0,0,0,1]])
-final_grasp_world_frame = world_to_cam_tf @ best_grasps[-1][0] @ panda_grasp_point_to_robotiq_grasp_point
+final_grasp_world_frame = world_to_cam_tf @ best_grasps[0][0] @ panda_grasp_point_to_robotiq_grasp_point
 grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
 grasp_point_world.transform(final_grasp_world_frame)
 pre_grasp_tf = np.array([[1,0,0,0],
