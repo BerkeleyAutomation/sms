@@ -26,7 +26,7 @@ from sms.tracking.frame import Frame
 from sms.data.utils.dino_dataloader2 import DinoDataloader
 import os.path as osp
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
-
+import open3d as o3d
 
 class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
@@ -213,8 +213,6 @@ class Optimizer:
                 # Wait for the user to set up the crops and groups.
                 while getattr(self.pipeline.model, "best_scales") is None:
                     time.sleep(0.1)
-                # while True:
-                #     time.sleep(0.1)
                 _ = input("Model populated (interactively crop and press enter to continue)")
                 self.keep_inds = self.pipeline.keep_inds
                 
@@ -357,3 +355,41 @@ class Optimizer:
         relevancy = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.optimizer.sms_model.num_points, -1)
         return relevancy
     
+    def state_to_ply(self, obj_id: int = None):
+        """Write translated gaussian means to a ply file for grasping subprocess."""
+        global_filename = self.pipeline.datamanager.get_datapath().joinpath("global.ply")
+        import pdb; pdb.set_trace() # Check correct filepath
+        
+        # TODO: Points currently un-updated by self.optimizer.part_deltas
+        
+        # Global state
+        prev_state = self.pipeline.state_stack[-1]
+        positions = prev_state["means"].detach().cpu().numpy().copy() # [N, 3]
+        features_dc = prev_state["features_dc"].detach().cpu().numpy()
+        
+        
+
+        if(self.pipeline.model.config.sh_degree > 0):
+            colors = SH2RGB(features_dc)
+        else:
+            colors = torch.sigmoid(features_dc)
+        normalized_colors = (colors - np.min(colors)) / (np.max(colors) - np.min(colors))
+
+        positions = positions.astype('float64')
+        normalized_colors = normalized_colors.astype('float64')
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(positions)
+        pcd.colors = o3d.utility.Vector3dVector(normalized_colors)
+        o3d.io.write_point_cloud(str(global_filename), pcd)
+        
+        # Local state
+        if obj_id is not None:
+            local_filename = self.pipeline.datamanager.get_datapath().joinpath("local.ply")
+            local_positions = positions[self.group_masks_global[obj_id].cpu().numpy()]
+            local_colors = normalized_colors[self.group_masks_global[obj_id].cpu().numpy()]
+            local_positions = local_positions.astype('float64')
+            local_colors = local_colors.astype('float64')
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(local_positions)
+            pcd.colors = o3d.utility.Vector3dVector(local_colors)
+            o3d.io.write_point_cloud(str(local_filename), pcd)

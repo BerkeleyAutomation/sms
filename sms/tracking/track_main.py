@@ -14,7 +14,8 @@ import warp as wp
 from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 from sms.tracking.utils2 import generate_videos
-import moviepy.editor as mpy
+from nerfstudio.models.splatfacto import SH2RGB
+
 
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
@@ -146,6 +147,12 @@ def main(
     
     @generate_grasps_handle.on_click
     def _(_):
+        # Global gaussian means (including unclustered points)
+        toad_opt.state_to_ply()
+            
+        group_masks = np.array([group_mask.detach().cpu().numpy() for group_mask in toad_opt.group_masks_global])
+        obj_idx = toad_opt.max_relevancy_label #  For drill spool scene: 0 for drill, 1 for wire spool
+        ToadObject.generate_grasps(points, colors, group_masks, obj_idx)
         return NotImplementedError
 
     real_frames = []
