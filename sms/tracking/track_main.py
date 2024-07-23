@@ -14,8 +14,8 @@ import warp as wp
 from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 from sms.tracking.utils2 import generate_videos
-from nerfstudio.models.splatfacto import SH2RGB
-
+from sms.tracking.toad_object import ToadObject
+import traceback 
 
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
@@ -148,7 +148,8 @@ def main(
     @generate_grasps_handle.on_click
     def _(_):
         # Global gaussian means (including unclustered points)
-        toad_opt.state_to_ply()
+        toad_opt.state_to_ply(toad_opt.max_relevancy_label)
+        import pdb; pdb.set_trace()
             
         group_masks = np.array([group_mask.detach().cpu().numpy() for group_mask in toad_opt.group_masks_global])
         obj_idx = toad_opt.max_relevancy_label #  For drill spool scene: 0 for drill, 1 for wire spool
@@ -256,11 +257,13 @@ def main(
             else:
                 time.sleep(1)
                 
-        except KeyboardInterrupt:
+        except:
+            # traceback.print_exc() 
             # Generate videos from the frames if the user interrupts the loop with ctrl+c
             frames_dict = {"real_frames": real_frames, 
                            "rendered_rgb": rendered_rgb_frames}
-            generate_videos(frames_dict, config_path=config_path)
+            generate_videos(frames_dict, config_path=config_path.parent)
+            exit()
 
 
 if __name__ == "__main__":

@@ -56,14 +56,19 @@ def get_hand_mask(img: Union[torch.tensor,np.ndarray]):
     return hand_mask
 
 def generate_videos(frames_dict, fps=30, config_path=None):
+    import datetime
+    timestr = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     for key in frames_dict.keys():
         frames = frames_dict[key]
         if len(frames)>1:
-            frames = [f.detach().cpu().numpy()*255 for f in frames]
+            if frames[0].max() > 1:
+                frames = [f for f in frames]
+            else:
+                frames = [f*255 for f in frames]
         clip = mpy.ImageSequenceClip(frames, fps=fps)
         if config_path is None:
-            clip.write_videofile(f"{key}.mp4", codec="libx264")
+            clip.write_videofile(f"{timestr}/{key}.mp4", codec="libx264")
         else:
-            clip.write_videofile(config_path+f"{key}.mp4", codec="libx264")
+            clip.write_videofile(str(config_path.joinpath(f"{timestr}/{key}.mp4")), codec="libx264")
     
     
