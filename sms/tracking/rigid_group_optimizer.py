@@ -62,10 +62,10 @@ class RigidGroupOptimizer:
         # self.sms_model.gauss_params["quats"] = self.sms_model.gauss_params[
         #     "quats"
         # ].detach().clone()
-        # self.dino_loader = dino_loader
+
         self.group_labels = group_labels
         self.group_masks = group_masks
-        # store a 7-vec of trans, rotation for each group
+        # store a 7-vec of trans, rotation for each group (x,y,z,qw,qx,qy,qz)
         self.part_deltas = torch.zeros(
             len(group_masks), 7, dtype=torch.float32, device="cuda"
         )

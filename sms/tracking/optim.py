@@ -383,6 +383,23 @@ class Optimizer:
 
         positions = positions.astype('float64')
         normalized_colors = normalized_colors.astype('float64')
+        # Homogenize positions for transformation
+        positions = np.hstack((positions, np.ones((positions.shape[0], 1))))
+        
+        deltas = self.optimizer.part_deltas.detach().clone().cpu().numpy() # [num_groups, 7] for x,y,z,qw,qx,qy,qz
+        for idx, delta in enumerate(deltas):
+            mask = self.group_masks_global[idx].cpu().numpy()
+            
+            quatxyzw = np.concatenate([delta[4:], delta[3:4]])
+            delta_transform = vtf.SE3.from_rotation_and_translation(
+                rotation=vtf.SO3.from_quaternion_xyzw(quatxyzw),
+                translation=delta[:3]
+            ).as_matrix()
+            positions[mask] = (delta_transform @ (positions[mask].T)).T
+            
+        # Un-homogenize positions
+        positions = positions[:, :3]    
+
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(positions)
         pcd.colors = o3d.utility.Vector3dVector(normalized_colors)

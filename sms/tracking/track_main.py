@@ -162,6 +162,8 @@ def main(
     # rendered_dino_frames = []
     
     obj_label_list = [None for _ in range(toad_opt.num_groups)]
+
+    
     while True: # Main tracking loop
         try:
             if zed is not None:
