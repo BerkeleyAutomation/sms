@@ -7,7 +7,7 @@ import tyro
 from pathlib import Path
 from autolab_core import RigidTransform
 # from sms.tracking.zed import Zed
-from sms.tracking.prime_tri_zed import Zed
+from sms.tracking.tri_zed import Zed
 from sms.tracking.optim import Optimizer
 from nerfstudio.cameras.cameras import Cameras
 import warp as wp
