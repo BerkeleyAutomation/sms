@@ -2,7 +2,7 @@ import open3d as o3d
 import numpy as np
 import viser
 
-ply_filepath = "/home/lifelong/sms/sms/data/utils/Detic/outputs/bowl_and_tape1/prime_gaussians.ply"
+ply_filepath = "/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_22_green_tape_bounding_cube/sms-data/2024-07-22_193605/global.ply"
 pcd = o3d.io.read_point_cloud(ply_filepath)
 points = np.asarray(pcd.points)
 colors = np.asarray(pcd.colors)

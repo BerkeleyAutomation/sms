@@ -74,6 +74,9 @@ def generate_videos(frames_dict, fps=30, config_path=None):
             if not path.exists():
                 path.mkdir(parents=True)
             clip.write_videofile(str(path.joinpath(f"{key}.mp4")), codec="libx264")
-        wandb.log({f"{key}": wandb.Video(str(path.joinpath(f"{key}.mp4")))})
+        try:
+            wandb.log({f"{key}": wandb.Video(str(path.joinpath(f"{key}.mp4")))})
+        except:
+            pass
     
     

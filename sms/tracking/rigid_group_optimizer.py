@@ -56,7 +56,8 @@ class RigidGroupOptimizer:
         Each rigid group can be optimized independently, with no skeletal constraints
         """
         self.config = config
-        if use_wandb:
+        self.use_wandb = use_wandb
+        if self.use_wandb:
             wandb.init(project="LEGS-TOGO", save_code=True)
         self.dataset_scale = dataset_scale
         self.tape = None
@@ -261,7 +262,9 @@ class RigidGroupOptimizer:
             self.reset_transforms()
             raise RuntimeError("Lost tracking")
         with torch.no_grad():
-            object_mask = outputs["accumulation"] > 0.9
+            object_mask = outputs["accumulation"] > 0.8
+        if not object_mask.any():
+            return None
         dino_feats = (
             self.blur(outputs["dino"].permute(2, 0, 1)[None])
             .squeeze()
@@ -271,6 +274,7 @@ class RigidGroupOptimizer:
             loss = (frame.dino_feats - dino_feats)[frame.hand_mask].norm(dim=-1).mean()
         else:
             loss = (frame.dino_feats - dino_feats).norm(dim=-1).mean()
+        import pdb; pdb.set_trace()
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
         wandb.log({"DINO mse_loss": loss.mean().item()})
         if use_depth:
@@ -314,17 +318,20 @@ class RigidGroupOptimizer:
         if use_rgb:
             rgb_loss = 0.05 * (outputs["rgb"] - frame.rgb).abs().mean()
             loss = loss + rgb_loss
-            wandb.log({"rgb_loss": rgb_loss.item()})
+            if self.use_wandb:
+                wandb.log({"rgb_loss": rgb_loss.item()})
         if use_atap:
             weights = torch.ones(len(self.group_masks), len(self.group_masks),dtype=torch.float32,device='cuda')
             atap_loss = self.atap(weights)
-            wandb.log({"atap_loss": atap_loss.item()})
+            if self.use_wandb:
+                wandb.log({"atap_loss": atap_loss.item()})
             loss = loss + atap_loss
         if do_obj_optim:
             # add regularizer on the poses to not move much
             reg = 0.02 * self.part_deltas[:,:3].norm(dim=-1).mean() + .01 * 2 * torch.acos(0.99*self.part_deltas[:,3]).mean()
             loss = loss + reg
-            wandb.log({"reg_loss": reg.item()})
+            if self.use_wandb:
+                wandb.log({"reg_loss": reg.item()})
         return loss
         
     def step(self, niter=1, use_depth=True, use_rgb=False):
@@ -351,10 +358,12 @@ class RigidGroupOptimizer:
             tape.backward()
             self.part_optimizer.step()
             part_scheduler.step()
+            import pdb; pdb.set_trace()
             part_grad_norms = self.part_deltas.grad.norm(dim=1)
-            for i in range(len(self.group_masks)):
-                wandb.log({f"part_delta{i} grad_norm": part_grad_norms[i].item()})
-            wandb.log({"loss": loss.item()})
+            if self.use_wandb:
+                for i in range(len(self.group_masks)):
+                    wandb.log({f"part_delta{i} grad_norm": part_grad_norms[i].item()})
+                wandb.log({"loss": loss.item()})
         # reset lr
         self.part_optimizer.param_groups[0]["lr"] = self.pose_lr
         
