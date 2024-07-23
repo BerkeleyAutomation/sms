@@ -20,7 +20,7 @@ from sms.sms_data_pipeline import smsdataPipeline
 from nerfstudio.utils import writer
 from nerfstudio.models.splatfacto import SH2RGB
 
-from sms.tracking.rigid_group_optimizer import RigidGroupOptimizer
+from sms.tracking.rigid_group_optimizer import RigidGroupOptimizer, RigidGroupOptimizerConfig
 from sms.tracking.toad_object import ToadObject
 from sms.tracking.frame import Frame
 from sms.data.utils.dino_dataloader2 import DinoDataloader
@@ -47,6 +47,10 @@ class Optimizer:
 
     optimizer: RigidGroupOptimizer
     """Optimizer for part poses."""
+    
+    optimizer_config: RigidGroupOptimizerConfig = RigidGroupOptimizerConfig()
+    """Configuration for the rigid group optimizer."""
+    
     MATCH_RESOLUTION: int = 500
     """Camera resolution for RigidGroupOptimizer."""
 
@@ -146,6 +150,7 @@ class Optimizer:
         self.orig_quats = self.pipeline.model.gauss_params["quats"].detach().clone()
 
         self.optimizer = RigidGroupOptimizer(
+            self.optimizer_config,
             self.pipeline.model,
             group_masks=self.group_masks,
             group_labels=self.group_labels,

@@ -23,22 +23,26 @@ from sms.tracking.frame import Frame
 import time
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 import wandb
-class RigidGroupOptimizer:
+
+@dataclass
+class RigidGroupOptimizerConfig:
     use_depth: bool = True
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
     depth_ignore_threshold: float = 0.1  # in meters
-    use_atap: bool = True
+    use_atap: bool = False
     pose_lr: float = 0.003
     pose_lr_final: float = 0.0005
     mask_hands: bool = False
-    do_obj_optim: bool = True
-
-    init_p2w: torch.Tensor
+    do_obj_optim: bool = False
+    blur_kernel_size: int = 5
+    
+class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
 
     def __init__(
         self,
+        config: RigidGroupOptimizerConfig,
         sms_model: smsGaussianSplattingModel,
         # dino_loader: DinoDataloader,
         group_masks: List[torch.Tensor],
@@ -51,6 +55,7 @@ class RigidGroupOptimizer:
         This one takes in a list of gaussian ID masks to optimize local poses for
         Each rigid group can be optimized independently, with no skeletal constraints
         """
+        self.config = config
         if use_wandb:
             wandb.init(project="LEGS-TOGO", save_code=True)
         self.dataset_scale = dataset_scale
@@ -68,6 +73,7 @@ class RigidGroupOptimizer:
 
         self.group_labels = group_labels
         self.group_masks = group_masks
+        
         # store a 7-vec of trans, rotation for each group (x,y,z,qw,qx,qy,qz)
         self.part_deltas = torch.zeros(
             len(group_masks), 7, dtype=torch.float32, device="cuda"
@@ -77,7 +83,7 @@ class RigidGroupOptimizer:
         )
         self.part_deltas = torch.nn.Parameter(self.part_deltas)
         self.part_deltas.requires_grad_(True)
-        k = 13
+        k = self.config.blur_kernel_size
         s = 0.3 * ((k - 1) * 0.5 - 1) + 0.8
         self.blur = kornia.filters.GaussianBlur2d((k, k), (s, s))
         self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.pose_lr)
@@ -277,9 +283,7 @@ class RigidGroupOptimizer:
                 pix_loss = pix_loss[
                     valids & (pix_loss < self.depth_ignore_threshold**2)
                 ]
-                # if torch.isnan(pix_loss.mean()).any():
-                #     print("NaN in depth loss")
-                #     import pdb; pdb.set_trace()
+
                 wandb.log({"depth_loss": pix_loss.mean().item()})
                 if not torch.isnan(pix_loss.mean()).any():
                     loss = loss + pix_loss.mean()

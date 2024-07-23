@@ -1043,7 +1043,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
 
         # DINO stuff
-        if (self.step - self.datamanager.dino_step > 0):
+        if (self.step - self.datamanager.dino_step > 0) or tracking:
             p_size = 14 #TODO: get from dataloader to not hardcode
             downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1050/max(H,W))/p_size
             dino_K = K.clone()
