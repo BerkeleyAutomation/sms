@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
 import moviepy.editor as mpy
+import wandb
 
 da_image_processor = AutoImageProcessor.from_pretrained("LiheYoung/depth-anything-small-hf")
 da_model = AutoModelForDepthEstimation.from_pretrained("LiheYoung/depth-anything-small-hf")
@@ -69,6 +70,10 @@ def generate_videos(frames_dict, fps=30, config_path=None):
         if config_path is None:
             clip.write_videofile(f"{timestr}/{key}.mp4", codec="libx264")
         else:
-            clip.write_videofile(str(config_path.joinpath(f"{timestr}/{key}.mp4")), codec="libx264")
+            path = config_path.joinpath(f"{timestr}")
+            if not path.exists():
+                path.mkdir(parents=True)
+            clip.write_videofile(str(path.joinpath(f"{key}.mp4")), codec="libx264")
+        wandb.log({f"{key}": wandb.Video(str(path.joinpath(f"{key}.mp4")))})
     
     

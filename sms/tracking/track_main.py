@@ -264,7 +264,7 @@ def main(
             # Generate videos from the frames if the user interrupts the loop with ctrl+c
             frames_dict = {"real_frames": real_frames, 
                            "rendered_rgb": rendered_rgb_frames}
-            generate_videos(frames_dict, config_path=config_path.parent)
+            generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
             exit()
 
 
