@@ -15,11 +15,12 @@ import pickle as pkl
 
 import os
 import sys
+import subprocess
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 grasp_ply_filepath = os.path.join(dir_path,'../ur5_interface/ur5_interface/scripts')
 sys.path.append(grasp_ply_filepath)
-# from grasp_ply_arnav import get_grasps
+
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class ToadObject:
@@ -97,11 +98,17 @@ class ToadObject:
         )
 
     def generate_grasps(
-        points: np.ndarray, # [N, 3]
-        color: np.ndarray, # [N, 3]
-        group_masks: np.ndarray # [num_groups, N]
-    ):
-      return NotImplementedError  
+        seg_np_path: str,
+        full_np_path: str,
+        table_bounding_box_path: str,
+        save_dir: str
+    ) -> List[np.ndarray]:
+        contact_graspnet_env_path = "/home/lifelong/anaconda3/envs/contact_graspnet/bin/python"
+        generate_grasps_path = "/home/lifelong/sms/sms/ur5_interface/ur5_interface/scripts/generate_grasp_ply.py"
+        result = subprocess.run([contact_graspnet_env_path, generate_grasps_path, "--seg_np_path", seg_np_path, "--full_np_path", full_np_path, "--pc_bounding_box_path", table_bounding_box_path, "--save_dir", save_dir], capture_output=True, text=True)
+        breakpoint()
+        final_grasps, all_scores = result.stdout
+        return final_grasps, all_scores
     
     @staticmethod
     def dummy_object() -> ToadObject:

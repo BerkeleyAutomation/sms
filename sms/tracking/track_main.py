@@ -149,12 +149,12 @@ def main(
     def _(_):
         # Global gaussian means (including unclustered points)
         toad_opt.state_to_ply(toad_opt.max_relevancy_label)
-        import pdb; pdb.set_trace()
-            
-        group_masks = np.array([group_mask.detach().cpu().numpy() for group_mask in toad_opt.group_masks_global])
-        obj_idx = toad_opt.max_relevancy_label #  For drill spool scene: 0 for drill, 1 for wire spool
-        ToadObject.generate_grasps(points, colors, group_masks, obj_idx)
-        return NotImplementedError
+        local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
+        global_ply_filename = str(toad_opt.config_path.parent.joinpath("global.ply"))
+        table_bounding_cube_filename = str(toad_opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
+        save_dir = str(toad_opt.config_path.parent)
+        ToadObject.generate_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, save_dir)
+        ToadObject.grasp_object()
 
     real_frames = []
     rendered_rgb_frames = []
@@ -163,7 +163,6 @@ def main(
     
     obj_label_list = [None for _ in range(toad_opt.num_groups)]
 
-    
     while True: # Main tracking loop
         try:
             if zed is not None:
