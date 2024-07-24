@@ -394,13 +394,18 @@ class Optimizer:
         deltas = self.optimizer.part_deltas.detach().clone().cpu().numpy() # [num_groups, 7] for x,y,z,qw,qx,qy,qz
         for idx, delta in enumerate(deltas):
             mask = self.group_masks_global[idx].cpu().numpy()
-            
+            initial_part2world = self.optimizer.get_initial_part2world(idx).detach().cpu().numpy()
+
+            positions[mask] = positions[mask] - np.hstack([np.array(initial_part2world[:3,3]), 0]) # world frame to object frame (initial rotation is identity)
+                        
             quatxyzw = np.concatenate([delta[4:], delta[3:4]])
             delta_transform = vtf.SE3.from_rotation_and_translation(
                 rotation=vtf.SO3.from_quaternion_xyzw(quatxyzw),
                 translation=delta[:3]
             ).as_matrix()
-            positions[mask] = (delta_transform @ (positions[mask].T)).T
+            
+            positions[mask] = (delta_transform @ (positions[mask].T)).T # apply delta transform in object frame
+            positions[mask] = positions[mask] + np.hstack([np.array(initial_part2world[:3,3]), 0]) # object frame back to world frame
             
         # Un-homogenize positions
         positions = positions[:, :3]    

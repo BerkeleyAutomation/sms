@@ -23,6 +23,7 @@ from sms.tracking.frame import Frame
 import time
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 import wandb
+from dataclasses import dataclass
 
 @dataclass
 class RigidGroupOptimizerConfig:
@@ -49,7 +50,7 @@ class RigidGroupOptimizer:
         group_labels: torch.Tensor,
         dataset_scale: float,
         render_lock = nullcontext(),
-        use_wandb = True,
+        use_wandb = False,
     ):
         """
         This one takes in a list of gaussian ID masks to optimize local poses for
@@ -87,16 +88,16 @@ class RigidGroupOptimizer:
         k = self.config.blur_kernel_size
         s = 0.3 * ((k - 1) * 0.5 - 1) + 0.8
         self.blur = kornia.filters.GaussianBlur2d((k, k), (s, s))
-        self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.pose_lr)
+        self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.config.pose_lr)
         self.keyframes = []
         #hand_frames stores a list of hand vertices and faces for each keyframe, stored in the OBJECT COORDINATE FRAME
         self.hand_frames = []
         # lock to prevent blocking the render thread if provided
         self.render_lock = render_lock
-        if self.use_atap and len(group_masks) > 1:
+        if self.config.use_atap and len(group_masks) > 1:
             self.atap = ATAPLoss(sms_model, group_masks, group_labels, self.dataset_scale)
         else:
-            self.use_atap = False
+            self.config.use_atap = False
         self.init_means = self.sms_model.gauss_params["means"].detach().clone()
         self.init_quats = self.sms_model.gauss_params["quats"].detach().clone()
         self.init_opacities = self.sms_model.gauss_params["opacities"].detach().clone()
@@ -165,7 +166,7 @@ class RigidGroupOptimizer:
         self.part_deltas = best_poses
         self.part_deltas = torch.nn.Parameter(self.part_deltas)
         self.part_deltas.requires_grad_(True)
-        self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.pose_lr)
+        self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.config.pose_lr)
 
         self.prev_part_deltas = best_poses
         return renders
@@ -274,9 +275,9 @@ class RigidGroupOptimizer:
             loss = (frame.dino_feats - dino_feats)[frame.hand_mask].norm(dim=-1).mean()
         else:
             loss = (frame.dino_feats - dino_feats).norm(dim=-1).mean()
-        import pdb; pdb.set_trace()
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
-        wandb.log({"DINO mse_loss": loss.mean().item()})
+        if self.use_wandb:
+            wandb.log({"DINO mse_loss": loss.mean().item()})
         if use_depth:
             if frame.metric_depth:
                 physical_depth = outputs["depth"] / self.dataset_scale
@@ -285,10 +286,10 @@ class RigidGroupOptimizer:
                     valids = valids & frame.hand_mask.unsqueeze(-1)
                 pix_loss = (physical_depth - frame.depth) ** 2
                 pix_loss = pix_loss[
-                    valids & (pix_loss < self.depth_ignore_threshold**2)
+                    valids & (pix_loss < self.config.depth_ignore_threshold**2)
                 ]
-
-                wandb.log({"depth_loss": pix_loss.mean().item()})
+                if self.use_wandb:
+                    wandb.log({"depth_loss": pix_loss.mean().item()})
                 if not torch.isnan(pix_loss.mean()).any():
                     loss = loss + pix_loss.mean()
             else:
@@ -299,7 +300,7 @@ class RigidGroupOptimizer:
                 object_mask = object_mask & (~frame_depth.isnan())
                 object_mask = object_mask & (outputs['depth'] > .05)
                 object_mask = kornia.morphology.erosion(
-                    object_mask.squeeze().unsqueeze(0).unsqueeze(0).float(), torch.ones((self.rank_loss_erode, self.rank_loss_erode), device='cuda')
+                    object_mask.squeeze().unsqueeze(0).unsqueeze(0).float(), torch.ones((self.config.rank_loss_erode, self.config.rank_loss_erode), device='cuda')
                 ).squeeze().bool()
                 if use_hand_mask:
                     object_mask = object_mask & frame.hand_mask
@@ -314,7 +315,7 @@ class RigidGroupOptimizer:
                 rend_samples = outputs["depth"][rand_samples]
                 mono_samples = frame_depth[rand_samples]
                 rank_loss = depth_ranking_loss(rend_samples, mono_samples)
-                loss = loss + self.rank_loss_mult*rank_loss
+                loss = loss + self.config.rank_loss_mult*rank_loss
         if use_rgb:
             rgb_loss = 0.05 * (outputs["rgb"] - frame.rgb).abs().mean()
             loss = loss + rgb_loss
@@ -337,9 +338,9 @@ class RigidGroupOptimizer:
     def step(self, niter=1, use_depth=True, use_rgb=False):
         part_scheduler = ExponentialDecayScheduler(
             ExponentialDecaySchedulerConfig(
-                lr_final=self.pose_lr_final, max_steps=niter
+                lr_final=self.config.pose_lr_final, max_steps=niter
             )
-        ).get_scheduler(self.part_optimizer, self.pose_lr)
+        ).get_scheduler(self.part_optimizer, self.config.pose_lr)
 
         for _ in range(niter):
             # renormalize rotation representation
@@ -352,20 +353,19 @@ class RigidGroupOptimizer:
             # Compute loss
             with tape:
                 loss = self.get_optim_loss(self.frame, self.part_deltas, 
-                    use_depth, use_rgb, self.use_atap, self.mask_hands, self.do_obj_optim)
+                    use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim)
             loss.backward()
             #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
             tape.backward()
             self.part_optimizer.step()
             part_scheduler.step()
-            import pdb; pdb.set_trace()
             part_grad_norms = self.part_deltas.grad.norm(dim=1)
             if self.use_wandb:
                 for i in range(len(self.group_masks)):
                     wandb.log({f"part_delta{i} grad_norm": part_grad_norms[i].item()})
                 wandb.log({"loss": loss.item()})
         # reset lr
-        self.part_optimizer.param_groups[0]["lr"] = self.pose_lr
+        self.part_optimizer.param_groups[0]["lr"] = self.config.pose_lr
         
         with torch.no_grad():
             with self.render_lock:
@@ -402,6 +402,7 @@ class RigidGroupOptimizer:
         )
         self.sms_model.gauss_params["quats"] = new_quats
         self.sms_model.gauss_params["means"] = new_means
+
 
     @torch.no_grad()
     def register_keyframe(self, lhands: List[trimesh.Trimesh], rhands: List[trimesh.Trimesh]):
