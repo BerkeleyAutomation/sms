@@ -16,6 +16,7 @@ from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 from sms.tracking.utils2 import generate_videos
 from sms.tracking.toad_object import ToadObject
 import traceback 
+import open3d as o3d
 
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
@@ -52,7 +53,8 @@ def main(
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
     query_handle = server.add_gui_button("Query", disabled=True) # Button for querying the object once the user has inputted the query
-    generate_grasps_handle = server.add_gui_button("Generate Grasps on Query", disabled=True) # Button for querying the object once the user has inputted the query
+    generate_grasps_handle = server.add_gui_button("Generate Grasps on Query", disabled=True) # Button for generating the grasps once the user has queried the object
+    execute_grasp_handle = server.add_gui_button("Execute Grasp for Query", disabled=True) # Button for executing the grasp once the user has generated all suitable grasps
     
     zed = Zed() # Initialize ZED
     
@@ -142,19 +144,53 @@ def main(
             toad_opt.max_relevancy_label = torch.argmax(relevancy_avg).item()
             toad_opt.max_relevancy_text = text_positives
             generate_grasps_handle.disabled = False
+            execute_grasp_handle.disabled = False
         else:
             print("No language query provided")
     
     @generate_grasps_handle.on_click
     def _(_):
-        # Global gaussian means (including unclustered points)
+        # generate_grasps_handle.disabled = True
         toad_opt.state_to_ply(toad_opt.max_relevancy_label)
         local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
         global_ply_filename = str(toad_opt.config_path.parent.joinpath("global.ply"))
         table_bounding_cube_filename = str(toad_opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
         save_dir = str(toad_opt.config_path.parent)
         ToadObject.generate_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, save_dir)
-        ToadObject.grasp_object()
+        # generate_grasps_handle.disabled = False
+        execute_grasp_handle.disabled = False
+        
+    @execute_grasp_handle.on_click
+    def _(_):
+        local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
+        global_ply_filename = str(toad_opt.config_path.parent.joinpath("global.ply"))
+        pred_grasps_filename = str(toad_opt.config_path.parent.joinpath("pred_grasps_world.npy"))
+        scores_filename = str(toad_opt.config_path.parent.joinpath("scores.npy"))
+        seg_pc = o3d.io.read_point_cloud(local_ply_filename)
+        full_pc = o3d.io.read_point_cloud(global_ply_filename)
+        pred_grasps = np.load(pred_grasps_filename)
+        scores = np.load(scores_filename)
+        ordered_scores = scores[np.argsort(scores[0])[::-1]]
+        # include viser visualization of the quality of the grasps
+        best_grasp = pred_grasps[np.argmax(scores)]
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        grasp_point_world.transform(best_grasp)
+        pre_grasp_tf = np.array([[1,0,0,0],
+                                [0,1,0,0],
+                                [0,0,1,-0.1],
+                                [0,0,0,1]])
+        pre_grasp_world_frame = best_grasp @ pre_grasp_tf
+        pre_grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        pre_grasp_point_world.transform(pre_grasp_world_frame)
+        # replace with viser
+        o3d.visualization.draw_geometries([full_pc,coordinate_frame,grasp_point_world,pre_grasp_point_world])
+        pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
+        robot.move_pose(pre_grasp_rigid_tf,vel=1.0,acc=0.1)
+        final_grasp_rigid_tf = RigidTransform(rotation=best_grasp[:3,:3],translation=best_grasp[:3,3])
+        robot.move_pose(final_grasp_rigid_tf,vel=1.0,acc=0.1)
+        robot.gripper.close()
+        robot.move_pose(pre_grasp_rigid_tf,vel=1.0,acc=0.1)
 
     real_frames = []
     rendered_rgb_frames = []
