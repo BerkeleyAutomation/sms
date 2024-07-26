@@ -465,6 +465,8 @@ class smsdataPipeline(VanillaPipeline):
             keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
             keep_list = [keep_inds_list[keep_inds_list_inner]]
         
+        table_z_val = -0.165 # z value of the table to filter out of our clusters
+        keep_list = [keep_list[0][torch.where(curr_means[keep_list[0]][:,2] > table_z_val)[0].cpu()]] # filter out table points
         # Remove the click handle + visualization
         self.click_location = None
         self.click_handle.remove()

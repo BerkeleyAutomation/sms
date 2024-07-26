@@ -17,7 +17,8 @@ from sms.tracking.utils2 import generate_videos
 from sms.tracking.toad_object import ToadObject
 import traceback 
 import open3d as o3d
-
+import pyzed.sl as sl
+import json
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
@@ -30,7 +31,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_22_green_tape_bounding_cube/sms-data/2024-07-22_193605/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_26_panda_gripper_demo6/sms-data/2024-07-26_144934/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -56,7 +57,9 @@ def main(
     generate_grasps_handle = server.add_gui_button("Generate Grasps on Query", disabled=True) # Button for generating the grasps once the user has queried the object
     execute_grasp_handle = server.add_gui_button("Execute Grasp for Query", disabled=True) # Button for executing the grasp once the user has generated all suitable grasps
     
-    zed = Zed() # Initialize ZED
+    wrist_zed_id = 16347230
+    extrinsic_zed_id = 22008760
+    zed = Zed(cam_id=extrinsic_zed_id) # Initialize ZED
     
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
@@ -164,10 +167,27 @@ def main(
     def _(_):
         local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
         global_ply_filename = str(toad_opt.config_path.parent.joinpath("global.ply"))
+        table_bounding_cube_filename = str(toad_opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
         pred_grasps_filename = str(toad_opt.config_path.parent.joinpath("pred_grasps_world.npy"))
         scores_filename = str(toad_opt.config_path.parent.joinpath("scores.npy"))
         seg_pc = o3d.io.read_point_cloud(local_ply_filename)
-        full_pc = o3d.io.read_point_cloud(global_ply_filename)
+        full_pc_unfiltered = o3d.io.read_point_cloud(global_ply_filename)
+
+        full_pc_points = np.asarray(full_pc_unfiltered.points)
+        full_pc_colors = np.asarray(full_pc_unfiltered.colors)
+        # Crop out noisy Gaussian means
+        bounding_box_dict = None
+        with open(table_bounding_cube_filename, 'r') as json_file:
+            # Step 2: Load the contents of the file into a Python dictionary
+            bounding_box_dict = json.load(json_file)
+        cropped_indices = (full_pc_points[:, 0] >= bounding_box_dict['x_min']) & (full_pc_points[:, 0] <= bounding_box_dict['x_max']) & (full_pc_points[:, 1] >= bounding_box_dict['y_min']) & (full_pc_points[:, 1] <= bounding_box_dict['y_max']) & (full_pc_points[:, 2] >= bounding_box_dict['z_min']) & (full_pc_points[:, 2] <= bounding_box_dict['z_max'])
+        filtered_pc_points = full_pc_points[cropped_indices]
+        filtered_pc_colors = full_pc_colors[cropped_indices]
+        
+        full_pc = o3d.geometry.PointCloud()
+        full_pc.points = o3d.utility.Vector3dVector(filtered_pc_points)
+        full_pc.colors = o3d.utility.Vector3dVector(filtered_pc_colors)
+        
         pred_grasps = np.load(pred_grasps_filename)
         scores = np.load(scores_filename)
         ordered_scores = scores[np.argsort(scores[0])[::-1]]
@@ -186,25 +206,38 @@ def main(
         # replace with viser
         o3d.visualization.draw_geometries([full_pc,coordinate_frame,grasp_point_world,pre_grasp_point_world])
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
-        robot.move_pose(pre_grasp_rigid_tf,vel=1.0,acc=0.1)
+        robot.gripper.open()
+        time.sleep(1)
+        robot.move_pose(pre_grasp_rigid_tf,vel=0.5,acc=0.1)
+        time.sleep(1)
         final_grasp_rigid_tf = RigidTransform(rotation=best_grasp[:3,:3],translation=best_grasp[:3,3])
-        robot.move_pose(final_grasp_rigid_tf,vel=1.0,acc=0.1)
+        robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
+        time.sleep(1)
         robot.gripper.close()
-        robot.move_pose(pre_grasp_rigid_tf,vel=1.0,acc=0.1)
+        time.sleep(1)
+        robot.move_pose(pre_grasp_rigid_tf,vel=0.5,acc=0.1)
+        time.sleep(5)
+        robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
+        time.sleep(1)
+        robot.gripper.open()
+        time.sleep(3)
 
     real_frames = []
     rendered_rgb_frames = []
     # rendered_depth_frames = []
     # rendered_dino_frames = []
-    
+    part_deltas = []
+    save_videos = False
     obj_label_list = [None for _ in range(toad_opt.num_groups)]
-
+    
+    
+    print("Starting main tracking loop")
     while True: # Main tracking loop
         try:
             if zed is not None:
                 start_time = time.time()
                 left, right, depth = zed.get_frame()
-                print("Got frame in ", time.time()-start_time)
+                # print("Got frame in ", time.time()-start_time)
                 start_time2 = time.time()
                 assert isinstance(toad_opt, Optimizer)
                 if toad_opt.initialized:
@@ -227,7 +260,8 @@ def main(
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
-                    real_frames.append(left.cpu().detach().numpy())
+                    if save_videos:
+                        real_frames.append(left.cpu().detach().numpy())
                     
                     server.add_image(
                         "cam/gs_render",
@@ -238,9 +272,11 @@ def main(
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
-                    rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+                    if save_videos:
+                        rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
                     
                     tf_list = toad_opt.get_parts2world()
+                    part_deltas.append(tf_list)
                     for idx, tf in enumerate(tf_list):
                         server.add_frame(
                             f"object/group_{idx}",
@@ -264,42 +300,37 @@ def main(
                         else:
                             if obj_label_list[idx] is not None:
                                 obj_label_list[idx].remove()
-                            
-                        
-                    
-                        # grasps = toad_opt.toad_object.grasps[idx] # [N_grasps, 7]
-                        # grasp_mesh = toad_opt.toad_object.grasp_axis_mesh()
-                        # for j, grasp in enumerate(grasps):
-                        #     server.add_mesh_trimesh(
-                        #         f"camera/object/group_{idx}/grasp_{j}",
-                        #         grasp_mesh,
-                        #         position=grasp[:3].cpu().numpy(),
-                        #         wxyz=grasp[3:].cpu().numpy(),
-                        #     )
 
                 # Visualize pointcloud.
                 start_time4 = time.time()
                 K = torch.from_numpy(zed.get_K()).float().cuda()
                 assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
-                points, colors = Zed.project_depth(left, depth, K, depth_threshold=0.5, subsample=6)
+                points, colors = Zed.project_depth(left, depth, K, depth_threshold=1.0, subsample=6)
                 server.add_point_cloud(
                     "camera/points",
                     points=points,
                     colors=colors,
                     point_size=0.001,
                 )
-                print("Visualized pointcloud in ", time.time()-start_time4)
-                print("Opt in ", time.time()-start_time2)
+                # print("Visualized pointcloud in ", time.time()-start_time4)
+                # print("Opt in ", time.time()-start_time2)
 
             else:
                 time.sleep(1)
                 
-        except:
+        except KeyboardInterrupt:
             # traceback.print_exc() 
             # Generate videos from the frames if the user interrupts the loop with ctrl+c
             frames_dict = {"real_frames": real_frames, 
                            "rendered_rgb": rendered_rgb_frames}
-            generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
+            timestr = generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
+            
+            # Save part deltas to npy file
+            path = config_path.parent.joinpath(f"{timestr}")
+            np.save(path.joinpath("part_deltas_traj.npy"), np.array(part_deltas))
+            exit()
+        except Exception as e:
+            print("An exception occured: ", e)
             exit()
 
 
