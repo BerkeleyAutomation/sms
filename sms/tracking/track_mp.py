@@ -6,21 +6,15 @@ import numpy as np
 import tyro
 from pathlib import Path
 from autolab_core import RigidTransform
-# from sms.tracking.zed import Zed
 from sms.tracking.tri_zed import Zed
 from sms.tracking.optim import Optimizer
-from nerfstudio.cameras.cameras import Cameras
 import warp as wp
 from ur5py.ur5 import UR5Robot
-from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
+from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig
 from sms.tracking.utils2 import generate_videos
 from sms.tracking.toad_object import ToadObject
-import traceback 
 import open3d as o3d
-import pyzed.sl as sl
-import json
-from multiprocessing import Process, SimpleQueue, shared_memory
-from torchvision.transforms.functional import resize
+from multiprocessing import Process, shared_memory
 import os.path as osp
 from sms.data.utils.dino_dataloader2 import DinoDataloader
 
@@ -41,13 +35,22 @@ def create_shm(shm_dict, create=True):
     return shm_dict
 
 def create_processes(process_dict, shm_dict, m_dict):
-    process_dict["capture_dino"] = Process(target=cap_dino_process, args=(shm_dict,m_dict,))
+    process_dict["capture_dino"] = Process(target=cap_process, args=(shm_dict,m_dict,))
     process_dict["track_opt"] = Process(target=track_opt_process, args=(shm_dict,m_dict,))
     return process_dict
 
-def cap_dino_process(shm_dict, m_dict):
-    zed = Zed(cam_id=16347230)
+def cap_process(shm_dict, m_dict):
+    zed = Zed(cam_id=m_dict["cam_id"])
     zed_shape = m_dict["zed_shape"]
+    zed_mini_focal_length = 730 
+    if(abs(zed.f_ - zed_mini_focal_length) > 10): # Check if the ZED connected is ZED mini or ZED2
+        print("Connected to Zed2")
+        zed.zed_mesh = zed.zed2_mesh
+        camera_tf = WORLD_TO_ZED2
+    else:
+        print("Connected to ZedMini")
+        zed.zed_mesh = zed.zedM_mesh
+        camera_tf = m_dict["wrist_world_to_cam"]
     print("ZED shape: ", zed_shape)
     img_buffer = np.ndarray((zed_shape[0], zed_shape[1], 3), dtype=np.uint8, buffer=shm_dict['rgb_shm'].buf)
     depth_buffer = np.ndarray((zed_shape[0], zed_shape[1]), dtype=np.float32, buffer=shm_dict['depth_shm'].buf)
@@ -88,7 +91,6 @@ def track_opt_process(shm_dict, m_dict):
             clip_n_dims=512, 
             device='cuda:0'
                 ).setup() # OpenCLIP encoder for language querying utils
-    assert isinstance(clip_encoder, OpenCLIPNetwork)
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
     query_handle = server.add_gui_button("Query", disabled=True) # Button for querying the object once the user has inputted the query
@@ -238,9 +240,8 @@ def main(
     world_to_wrist = robot.get_pose()
     world_to_wrist.from_frame = "wrist"
     world_to_cam = world_to_wrist * WRIST_TO_CAM
-    proper_world_to_cam_translation = world_to_cam.translation
     proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
-    proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=proper_world_to_cam_translation,from_frame='cam',to_frame='world')
+    proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=world_to_cam.translation,from_frame='cam',to_frame='world')
     proper_world_to_wrist = proper_world_to_cam * WRIST_TO_CAM.inverse()
         
     robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
@@ -256,12 +257,13 @@ def main(
         camera_tf = proper_world_to_cam
 
     l, _, depth = zed.get_frame(depth=True)  # Grab a frame from the camera.
+    m_dict["cam_id"] = cam_id
     m_dict["camera_tf"] = camera_tf
     m_dict["zed_mesh"] = zed.zed_mesh
     m_dict["config_path"] = config_path
     m_dict["zed_shape"] = l.shape
     m_dict["zed_K"] = zed.get_K()
-
+    m_dict["wrist_world_to_cam"] = proper_world_to_wrist
     m_dict["c2z"] = zed.cam_to_zed
     
     # @execute_grasp_handle.on_click
