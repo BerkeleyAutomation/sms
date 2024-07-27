@@ -106,9 +106,7 @@ class ToadObject:
         contact_graspnet_env_path = "/home/lifelong/anaconda3/envs/contact_graspnet/bin/python"
         generate_grasps_path = "/home/lifelong/sms/sms/ur5_interface/ur5_interface/scripts/generate_grasp_ply.py"
         result = subprocess.run([contact_graspnet_env_path, generate_grasps_path, "--seg_np_path", seg_np_path, "--full_np_path", full_np_path, "--pc_bounding_box_path", table_bounding_box_path, "--save_dir", save_dir], capture_output=True, text=True)
-        breakpoint()
-        final_grasps, all_scores = result.stdout
-        return final_grasps, all_scores
+        print("Successfully generated grasps")
     
     @staticmethod
     def dummy_object() -> ToadObject:

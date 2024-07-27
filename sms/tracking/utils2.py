@@ -78,5 +78,5 @@ def generate_videos(frames_dict, fps=30, config_path=None):
             wandb.log({f"{key}": wandb.Video(str(path.joinpath(f"{key}.mp4")))})
         except:
             pass
-    
+    return timestr
     

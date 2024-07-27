@@ -18,7 +18,7 @@ class Frame:
     dino_feats: torch.Tensor
     hand_mask: torch.Tensor
 
-    def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor] = None):
+    def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor] = None, dino: Optional[torch.Tensor] = None):
         """
         Initialize the frame
 
@@ -45,10 +45,12 @@ class Frame:
                             (camera.height, camera.width),
                             antialias=True,
                         ).squeeze().unsqueeze(-1)
-
-        self.dino_feats = dino_fn(
-            rgb.permute(2, 0, 1).unsqueeze(0)
-        ).squeeze()
+        if dino is not None:
+            self.dino_feats = dino
+        else:
+            self.dino_feats = dino_fn(
+                rgb.permute(2, 0, 1).unsqueeze(0)
+            ).squeeze()
         self.dino_feats = resize(
             self.dino_feats.permute(2, 0, 1),
             (camera.height, camera.width),

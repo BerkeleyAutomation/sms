@@ -244,11 +244,11 @@ class Optimizer:
         
         return cluster_labels_keep.int().cuda(), group_masks, group_masks_global
 
-    def set_frame(self, rgb, ns_camera, depth) -> None:
+    def set_frame(self, rgb, ns_camera, depth, dino = None) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
         
-        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
+        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth, dino = dino)
         
         self.optimizer.set_frame(frame)
 
