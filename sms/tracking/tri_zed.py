@@ -169,8 +169,11 @@ class Zed():
     cam_to_zed: RigidTransform
     """Transform from left camera to ZED camera base."""
 
-    def __init__(self, recording_file = None, start_time = 0.0):
+    def __init__(self, cam_id=None, recording_file = None, start_time = 0.0):
         init = sl.InitParameters()
+        if cam_id is not None:
+            init.set_from_serial_number(cam_id)
+            self.cam_id = cam_id
         self.width = None
         self.debug_ = False
         self.height = None

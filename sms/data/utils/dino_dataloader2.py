@@ -184,7 +184,8 @@ class DinoDataloader(FeatureDataloader):
         preproc_image_lst = preprocess(image_list).to(self.device)
         dino_embeds = []
 
-        for image in tqdm(preproc_image_lst, desc="dino", total=len(image_list), leave=False):
+        # for image in tqdm(preproc_image_lst, desc="dino", total=len(image_list), leave=False):
+        for image in preproc_image_lst:
             with torch.no_grad():
                 # DVT
                 if self.use_denoiser:
