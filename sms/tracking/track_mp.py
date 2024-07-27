@@ -17,17 +17,11 @@ import open3d as o3d
 from multiprocessing import Process, shared_memory
 import os.path as osp
 from sms.data.utils.dino_dataloader2 import DinoDataloader
+from sms.tracking.motion import Motion
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
 
-def clear_tcp(robot):
-    tool_to_wrist = RigidTransform()
-    tool_to_wrist.translation = np.array([0, 0, 0])
-    tool_to_wrist.from_frame = "tool"
-    tool_to_wrist.to_frame = "wrist"
-    robot.set_tcp(tool_to_wrist)
-    
 def create_shm(shm_dict, create=True):
     shm_dict["depth_shm"] = shared_memory.SharedMemory(name="depth_shm", create=create, size=704*1280*32)
     shm_dict["dino_shm"] = shared_memory.SharedMemory(name="dino_shm", create=create, size=41*75*64*32)
@@ -46,11 +40,9 @@ def cap_process(shm_dict, m_dict):
     if(abs(zed.f_ - zed_mini_focal_length) > 10): # Check if the ZED connected is ZED mini or ZED2
         print("Connected to Zed2")
         zed.zed_mesh = zed.zed2_mesh
-        camera_tf = WORLD_TO_ZED2
     else:
         print("Connected to ZedMini")
         zed.zed_mesh = zed.zedM_mesh
-        camera_tf = m_dict["wrist_world_to_cam"]
     print("ZED shape: ", zed_shape)
     img_buffer = np.ndarray((zed_shape[0], zed_shape[1], 3), dtype=np.uint8, buffer=shm_dict['rgb_shm'].buf)
     depth_buffer = np.ndarray((zed_shape[0], zed_shape[1]), dtype=np.float32, buffer=shm_dict['depth_shm'].buf)
@@ -232,20 +224,9 @@ def main(
     cam_id = extrinsic_zed_id
     zed = Zed(cam_id=cam_id) # Initialize ZED
     
-    robot = UR5Robot(gripper=1)
-    clear_tcp(robot)
-    
-    home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
-    robot.move_joint(home_joints,vel=1.0,acc=0.1)
-    world_to_wrist = robot.get_pose()
-    world_to_wrist.from_frame = "wrist"
-    world_to_cam = world_to_wrist * WRIST_TO_CAM
-    proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
-    proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=world_to_cam.translation,from_frame='cam',to_frame='world')
-    proper_world_to_wrist = proper_world_to_cam * WRIST_TO_CAM.inverse()
+
+    motion = Motion(UR5Robot(gripper=1))
         
-    robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
-    
     zed_mini_focal_length = 730 
     if(abs(zed.f_ - zed_mini_focal_length) > 10): # Check if the ZED connected is ZED mini or ZED2
         print("Connected to Zed2")
@@ -254,7 +235,7 @@ def main(
     else:
         print("Connected to ZedMini")
         zed.zed_mesh = zed.zedM_mesh
-        camera_tf = proper_world_to_cam
+        camera_tf = motion.home_world_to_cam
 
     l, _, depth = zed.get_frame(depth=True)  # Grab a frame from the camera.
     m_dict["cam_id"] = cam_id
@@ -263,7 +244,6 @@ def main(
     m_dict["config_path"] = config_path
     m_dict["zed_shape"] = l.shape
     m_dict["zed_K"] = zed.get_K()
-    m_dict["wrist_world_to_cam"] = proper_world_to_wrist
     m_dict["c2z"] = zed.cam_to_zed
     
     # @execute_grasp_handle.on_click
