@@ -15,7 +15,7 @@ from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 from sms.tracking.utils2 import generate_videos
 from sms.tracking.toad_object import ToadObject
-import traceback 
+# import traceback 
 import open3d as o3d
 import pyzed.sl as sl
 import json
@@ -31,7 +31,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_26_panda_gripper_demo6/sms-data/2024-07-26_144934/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_24_gripper_with_tape/sms-data/2024-07-27_210427/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -59,13 +59,11 @@ def main(
     
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
-    zed = Zed(cam_id=extrinsic_zed_id) # Initialize ZED
+    zed = Zed(cam_id=extrinsic_zed_id,is_res_1080=True) # Initialize ZED
     
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
-    
-    import pdb;pdb.set_trace()
-    
+        
     home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
     world_to_wrist = robot.get_pose()
@@ -75,8 +73,7 @@ def main(
     proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
     proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=proper_world_to_cam_translation,from_frame='cam',to_frame='world')
     proper_world_to_wrist = proper_world_to_cam * WRIST_TO_CAM.inverse()
-    
-    pdb.set_trace()
+
     robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
     
     zed_mini_focal_length = 730 
@@ -230,7 +227,7 @@ def main(
     # rendered_depth_frames = []
     # rendered_dino_frames = []
     part_deltas = []
-    save_videos = False
+    save_videos = True
     obj_label_list = [None for _ in range(toad_opt.num_groups)]
     
     
@@ -322,7 +319,6 @@ def main(
                 time.sleep(1)
                 
         except KeyboardInterrupt:
-            # traceback.print_exc() 
             # Generate videos from the frames if the user interrupts the loop with ctrl+c
             frames_dict = {"real_frames": real_frames, 
                            "rendered_rgb": rendered_rgb_frames}

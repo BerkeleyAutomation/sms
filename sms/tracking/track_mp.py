@@ -29,7 +29,7 @@ def create_shm(shm_dict, create=True):
     return shm_dict
 
 def create_processes(process_dict, shm_dict, m_dict):
-    process_dict["capture_dino"] = Process(target=cap_process, args=(shm_dict,m_dict,))
+    process_dict["capture"] = Process(target=cap_process, args=(shm_dict,m_dict,))
     process_dict["track_opt"] = Process(target=track_opt_process, args=(shm_dict,m_dict,))
     return process_dict
 
@@ -60,7 +60,7 @@ def cap_process(shm_dict, m_dict):
     dino_fn = dino_dataloader.get_pca_feats
     
     while True:
-        left, right, depth = zed.get_frame()
+        left, _, depth = zed.get_frame()
         rgb = left/255.0
         dino_feats = dino_fn(
                 rgb.permute(2, 0, 1).unsqueeze(0)
@@ -179,15 +179,69 @@ def track_opt_process(shm_dict, m_dict):
             
     # Tracking process
     print("Starting tracking process")
+    obj_label_list = [None for _ in range(toad_opt.num_groups)]
+
     while True:
+        start_time = time.time()
         left = torch.from_numpy(img_buffer).cuda().clone()
         depth = torch.from_numpy(depth_buffer).cuda().clone()
         dino = torch.from_numpy(dino_buffer).cuda().clone()
         if toad_opt.initialized:
             toad_opt.set_frame(left,toad_opt.cam2world_ns,depth,dino)
             n_opt_iters = 25
+            start_time5 = time.time()
             outputs = toad_opt.step_opt(niter=n_opt_iters)
-        
+            print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
+            # Add ZED img and GS render to viser
+            server.add_image(
+                "cam/zed_left",
+                left.cpu().detach().numpy(),
+                render_width=left.shape[1]/2500,
+                render_height=left.shape[0]/2500,
+                position = (0.5, 0.5, 0.5),
+                wxyz=(0, -0.7071068, -0.7071068, 0),
+                visible=True
+            )
+            # if save_videos:
+            #     real_frames.append(left.cpu().detach().numpy())
+            
+            server.add_image(
+                "cam/gs_render",
+                outputs["rgb"].cpu().detach().numpy(),
+                render_width=left.shape[1]/2500,
+                render_height=left.shape[0]/2500,
+                position = (0.5, -0.5, 0.5),
+                wxyz=(0, -0.7071068, -0.7071068, 0),
+                visible=True
+            )
+            # if save_videos:
+            #     rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+            
+            tf_list = toad_opt.get_parts2world()
+            # part_deltas.append(tf_list)
+            for idx, tf in enumerate(tf_list):
+                server.add_frame(
+                    f"object/group_{idx}",
+                    position=tf.translation(),
+                    wxyz=tf.rotation().wxyz,
+                    show_axes=True,
+                    axes_length=0.05,
+                    axes_radius=.001
+                )
+                mesh = toad_opt.toad_object.meshes[idx]
+                server.add_mesh_trimesh(
+                    f"object/group_{idx}/mesh",
+                    mesh=mesh,
+                )
+                if idx == toad_opt.max_relevancy_label:
+                    obj_label_list[idx] = server.add_label(
+                    f"object/group_{idx}/label",
+                    text=toad_opt.max_relevancy_text,
+                    position = (0,0,0.05),
+                    )
+                else:
+                    if obj_label_list[idx] is not None:
+                        obj_label_list[idx].remove()
         # Visualize the pointcloud
         K = torch.from_numpy(zed_K).float().cuda()
         assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
@@ -198,9 +252,10 @@ def track_opt_process(shm_dict, m_dict):
             colors=colors,
             point_size=0.001,
         )
+        print(f"Frequency: {1/(time.time()-start_time)}")
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_25_panda_gripper_demo4/sms-data/2024-07-25_231454/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_24_gripper_with_tape/sms-data/2024-07-27_210427/config.yml"),
 ):
     """
     Args:
@@ -245,6 +300,7 @@ def main(
     m_dict["zed_shape"] = l.shape
     m_dict["zed_K"] = zed.get_K()
     m_dict["c2z"] = zed.cam_to_zed
+    zed.cam.close()
     
     # @execute_grasp_handle.on_click
     # def _(_):

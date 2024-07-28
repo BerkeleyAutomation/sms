@@ -169,7 +169,7 @@ class Zed():
     cam_to_zed: RigidTransform
     """Transform from left camera to ZED camera base."""
 
-    def __init__(self, cam_id=None, recording_file = None, start_time = 0.0):
+    def __init__(self, cam_id=None, recording_file = None, start_time = 0.0,is_res_1080=False):
         init = sl.InitParameters()
         if cam_id is not None:
             init.set_from_serial_number(cam_id)
@@ -181,6 +181,14 @@ class Zed():
             init.set_from_svo_file(recording_file)
             # disable depth
             init.camera_image_flip = sl.FLIP_MODE.ON
+            init.depth_mode=sl.DEPTH_MODE.NONE
+            init.camera_resolution = sl.RESOLUTION.HD1080
+            init.sdk_verbose = 1
+            init.camera_fps = 30
+            self.width = 1920
+            self.height = 1080
+        elif is_res_1080:
+            init.camera_image_flip = sl.FLIP_MODE.OFF
             init.depth_mode=sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1

@@ -149,6 +149,7 @@ class RigidGroupOptimizer:
         for z_rot in np.linspace(0, np.pi * 2, n_seeds):
             whole_pose_adj = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
             # x y z qw qx qy qz
+            # z_rot = 0
             quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
             whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
             whole_pose_adj[:, 3:] = quat
@@ -243,7 +244,7 @@ class RigidGroupOptimizer:
 
         part2world = initial_part2world.clone()
         part2world[:3,:3] = R_delta[:3,:3].matmul(part2world[:3,:3])# rotate around world frame
-        part2world[:3,3] += self.part_deltas[i,:3] # * VISER_NERFSTUDIO_SCALE_RATIO # translate in world frame
+        part2world[:3,3] += self.part_deltas[i,:3] # translate in world frame
         return part2world
     
     def get_initial_part2world(self,i):

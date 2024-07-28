@@ -51,7 +51,7 @@ class Optimizer:
     optimizer_config: RigidGroupOptimizerConfig = RigidGroupOptimizerConfig()
     """Configuration for the rigid group optimizer."""
     
-    MATCH_RESOLUTION: int = 500
+    MATCH_RESOLUTION: int = 720
     """Camera resolution for RigidGroupOptimizer."""
 
     initialized: bool = False
@@ -138,6 +138,8 @@ class Optimizer:
             width=width,
             height=height,
         )
+        # import pdb
+        # pdb.set_trace()
         cam2world_ns.rescale_output_resolution(
             self.MATCH_RESOLUTION / max(width, height)
         )

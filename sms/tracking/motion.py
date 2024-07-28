@@ -7,8 +7,8 @@ WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_int
 class Motion:
     def __init__(self, robot: UR5Robot):
         self.robot = robot
-        robot = UR5Robot(gripper=1)
-        self.clear_tcp(robot)
+        # robot = UR5Robot(gripper=1)
+        self.clear_tcp()
         
         home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
         robot.move_joint(home_joints,vel=1.0,acc=0.1)

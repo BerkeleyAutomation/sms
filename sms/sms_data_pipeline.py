@@ -6,7 +6,7 @@ from pathlib import Path
 import torch.distributed as dist
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
-
+import json
 # from nerfstudio.configs import base_config as cfg
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils.math import intersect_aabb, intersect_obb
@@ -460,12 +460,16 @@ class smsdataPipeline(VanillaPipeline):
             
             sphere_inds_keep = [(torch.where(keep_inds_list == torch.tensor(sphere_inds)[i])[0]).item() for i in sphere_ind_vote.tolist()]
             # Secondary clustering in cartesian space to filter outliers
-            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.013, min_points=1)
+            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.008, min_points=1)
             inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
             keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
             keep_list = [keep_inds_list[keep_inds_list_inner]]
         
-        table_z_val = -0.165 # z value of the table to filter out of our clusters
+        table_bounding_cube_filename = self.datamanager.get_datapath().joinpath("table_bounding_cube.json")
+        with open(table_bounding_cube_filename, 'r') as json_file: 
+            bounding_box_dict = json.load(json_file)
+        table_z_val = bounding_box_dict['table_height'] + 0.008 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
+        # table_z_val = -0.165 # z value of the table to filter out of our clusters
         keep_list = [keep_list[0][torch.where(curr_means[keep_list[0]][:,2] > table_z_val)[0].cpu()]] # filter out table points
         # Remove the click handle + visualization
         self.click_location = None
