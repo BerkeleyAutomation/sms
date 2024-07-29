@@ -45,7 +45,6 @@ class RigidGroupOptimizer:
         self,
         config: RigidGroupOptimizerConfig,
         sms_model: smsGaussianSplattingModel,
-        # dino_loader: DinoDataloader,
         group_masks: List[torch.Tensor],
         group_labels: torch.Tensor,
         dataset_scale: float,

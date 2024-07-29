@@ -751,13 +751,13 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 args=[training_callback_attributes.optimizers],
             )
         )
-        cbs.append(
-            TrainingCallback(
-                [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
-                self.add_deprojected_means,
-                args=[self.deprojected_new, self.colors_new, training_callback_attributes.optimizers],
-            )
-        )
+        # cbs.append(
+        #     TrainingCallback(
+        #         [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
+        #         self.add_deprojected_means,
+        #         args=[self.deprojected_new, self.colors_new, training_callback_attributes.optimizers],
+        #     )
+        # )
         return cbs
 
     def step_cb(self, step):
