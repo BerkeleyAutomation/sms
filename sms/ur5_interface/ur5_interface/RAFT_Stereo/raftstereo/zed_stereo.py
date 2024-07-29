@@ -31,8 +31,7 @@ class Zed:
         init.camera_disable_self_calib = True
         status = self.cam.open(init)
         # manually sets exposure
-        self.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 30)
-        self.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 60)
+
         self.recording_file = recording_file
         self.start_time = start_time
         if recording_file is not None:

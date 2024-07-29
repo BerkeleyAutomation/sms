@@ -18,7 +18,6 @@ from scipy.spatial import ConvexHull
 import pyzed.sl as sl
 
 HOME_DIR = "/home/lifelong/sms/sms/data/utils/Detic"
-# wrist_to_cam = RigidTransform.load("/home/lifelong/ur5_legs/T_webcam_wrist.tf")
 wrist_to_cam = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 world_to_extrinsic_zed = RigidTransform.load('/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf')
 # threshold to filte
@@ -174,9 +173,9 @@ def set_up_dirs(scene_name):
     img_save_dir = f"{HOME_DIR}/{scene_name}/img"
     img_r_save_dir = f"{HOME_DIR}/{scene_name}/img_r"
     depth_save_dir = f"{HOME_DIR}/{scene_name}/depth"
-    # no_t_depth_save_dir = f"{HOME_DIR}/{scene_name}/no_table_depth"
-    # no_t_depth_viz_save_dir = f"{HOME_DIR}/{scene_name}/no_table_depth_png"
-    # seg_mask_save_dir = f"{HOME_DIR}/{scene_name}/seg_mask"
+    # no_t_depth_save_dir = f"{HOME_DIR}/data/{scene_name}/no_table_depth"
+    # no_t_depth_viz_save_dir = f"{HOME_DIR}/data/{scene_name}/no_table_depth_png"
+    # seg_mask_save_dir = f"{HOME_DIR}/data/{scene_name}/seg_mask"
     depth_viz_save_dir = f"{HOME_DIR}/{scene_name}/depth_png"
     pose_save_dir = f"{HOME_DIR}/{scene_name}/poses"
 
@@ -268,7 +267,7 @@ def isolateTable(cam,proper_world_to_cam):
     label_set = set(db.labels_)
     label_set.remove(-1)
     print(label_set)
-    max_size = 0
+    max_area = 0
     x_min_cam = 0
     x_max_cam = 0
     y_min_cam = 0
@@ -286,8 +285,9 @@ def isolateTable(cam,proper_world_to_cam):
         x_max_cam_cluster = max_bounding_cube_camera_frame[0,0]
         y_max_cam_cluster = max_bounding_cube_camera_frame[1,0]
         z_max_cam_cluster = max_bounding_cube_camera_frame[2,0]
-        if(len(filtered_table_pointcloud) > max_size):
-            max_size = len(filtered_table_pointcloud)
+        hull = ConvexHull(filtered_table_pointcloud)
+        if(hull.volume > max_area):
+            max_area = hull.volume
             x_min_cam = x_min_cam_cluster
             x_max_cam = x_max_cam_cluster
             y_min_cam = y_min_cam_cluster
@@ -299,14 +299,12 @@ def isolateTable(cam,proper_world_to_cam):
     
     min_bounding_cube_camera_frame = np.array([x_min_cam,y_min_cam,z_min_cam,1]).reshape(-1,1)
     max_bounding_cube_camera_frame = np.array([x_max_cam,y_max_cam,z_max_cam,1]).reshape(-1,1)
-    table_height_camera_frame = np.array([0,0,-plane_model[3],1]).reshape(-1,1)
     min_bounding_cube_world = proper_world_to_cam.matrix @ min_bounding_cube_camera_frame
     max_bounding_cube_world = proper_world_to_cam.matrix @ max_bounding_cube_camera_frame
-    table_height_world_frame = proper_world_to_cam.matrix @ table_height_camera_frame
     #offset = np.array([0.01,0.01,0.01,0]).reshape(-1,1)
     min_bounding_cube_world = min_bounding_cube_world# - offset
     max_bounding_cube_world = max_bounding_cube_world# + offset
-
+    
     x_min_world = min_bounding_cube_world[0,0]
     y_min_world = min_bounding_cube_world[1,0]
     z_min_world = min_bounding_cube_world[2,0]
@@ -325,8 +323,7 @@ def isolateTable(cam,proper_world_to_cam):
         temp = z_min_world
         z_min_world = z_max_world
         z_max_world = temp
-    table_height = table_height_world_frame[2,0]
-    return x_min_world,x_max_world,y_min_world,y_max_world,z_min_world,z_max_world,table_height
+    return x_min_world,x_max_world,y_min_world,y_max_world,z_min_world,z_max_world
     
 def convert_pointcloud_to_image(points,rgbs,K,image_width,image_height):
     ones = np.ones((points.data.T.shape[0],1))
@@ -362,10 +359,8 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         
         robot = UR5Robot(gripper=1)
         clear_tcp(robot)
-
-        home_joints = np.array([0.30870315432548523, -1.2771266142474573, -1.5955479780780237, -1.754920784627096, 1.5260951519012451, 0.2983420491218567])
+        home_joints = np.array([0.3103832006454468, -1.636097256337301, -0.5523660818683069, -2.4390090147601526, 1.524283766746521, 0.29816189408302307])
         robot.move_joint(home_joints,vel=1.0,acc=0.1)
-        
         world_to_wrist = robot.get_pose()
         world_to_wrist.from_frame = "wrist"
         world_to_cam = world_to_wrist * wrist_to_cam
@@ -456,7 +451,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     tool_to_wrist.to_frame = "wrist"
     robot.set_tcp(tool_to_wrist)
     
-    x_min_world,x_max_world,y_min_world,y_max_world,z_min_world,z_max_world,table_height = isolateTable(cam,proper_world_to_cam)
+    x_min_world,x_max_world,y_min_world,y_max_world,z_min_world,z_max_world = isolateTable(cam,proper_world_to_cam)
 
     # angle range from top of sphere
     phi_min, phi_max = 65, 20
@@ -574,9 +569,13 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         (global_pointcloud[:, 2] >= z_min_world) & (global_pointcloud[:, 2] <= z_max_world)
     ]
     num_gaussians_initialization = 200000
-    close_gaussian_indices = np.random.choice(close_pointcloud.shape[0],num_gaussians_initialization,replace=False)
-    subsampled_close_pointcloud = close_pointcloud[close_gaussian_indices]
-    subsampled_close_rgbcloud = close_rgbcloud[close_gaussian_indices]
+    if len(close_pointcloud) > num_gaussians_initialization:
+        close_gaussian_indices = np.random.choice(close_pointcloud.shape[0],num_gaussians_initialization,replace=False)
+        subsampled_close_pointcloud = close_pointcloud[close_gaussian_indices]
+        subsampled_close_rgbcloud = close_rgbcloud[close_gaussian_indices]
+    else:
+        subsampled_close_pointcloud = close_pointcloud
+        subsampled_close_rgbcloud = close_rgbcloud
     db = DBSCAN(eps=0.005, min_samples=20) #
     labels = db.fit_predict(subsampled_close_pointcloud)
     subsampled_close_pointcloud = subsampled_close_pointcloud[labels != -1]
@@ -589,7 +588,10 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     subsampled_not_close_rgbcloud = not_close_rgbcloud[not_close_gaussian_indices]
     full_subsampled_pointcloud = np.vstack((subsampled_close_pointcloud,subsampled_not_close_pointcloud))
     full_subsampled_rgbcloud = np.vstack((subsampled_close_rgbcloud,subsampled_not_close_rgbcloud))
-    final_indices = np.random.choice(full_subsampled_pointcloud.shape[0],num_gaussians_initialization,replace=False)
+    if num_gaussians_initialization > full_subsampled_pointcloud.shape[0]:
+        final_indices = np.arange(full_subsampled_pointcloud.shape[0])
+    else:
+        final_indices = np.random.choice(full_subsampled_pointcloud.shape[0],num_gaussians_initialization,replace=False)
     final_pointcloud = full_subsampled_pointcloud[final_indices]
     final_rgbcloud = full_subsampled_rgbcloud[final_indices]
     server = viser.ViserServer()
@@ -609,8 +611,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         'y_min':y_min_world,
         'y_max':y_max_world,
         'z_min':z_min_world,
-        'z_max':z_max_world,
-        'table_height':table_height
+        'z_max':z_max_world
     }
 
     with open(os.path.join(save_dirs['poses'],'..','table_bounding_cube.json'), 'w') as json_file:
@@ -673,7 +674,7 @@ def table_paste_dir(scene_name):
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--scene", type=str)
+    argparser.add_argument("--scene", type=str,required=True)
     args = argparser.parse_args()
     scene_name = args.scene
     prime_sphere_main(scene_name)

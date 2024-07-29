@@ -35,9 +35,9 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     best_scores = {0:scores[0][np.argsort(scores[0])[::-1]][:1]}
     best_grasps = {0:pred_grasps_cam[0][np.argsort(scores[0])[::-1]][:1]}
     world_to_cam_tf = np.array([[0,-1,0,0],
-                                        [-1,0,0,0],
-                                        [0,0,-1,0],
-                                        [0,0,0,1]])
+                                [-1,0,0,0],
+                                [0,0,-1,0],
+                                [0,0,0,1]])
 
 
     visualize_grasps(pc_full, best_grasps, best_scores, plot_opencv_cam=True, pc_colors=pc_colors)
@@ -55,7 +55,7 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     # o3d.visualization.draw_geometries([point_cloud_cam,coordinate_frame,grasp_point])
 
     ones = np.ones((pc_full.shape[0],1))
-    world_to_cam_tf = RigidTransform.load('/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf').matrix
+    world_to_cam_tf = RigidTransform.load('/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed_for_grasping.tf').matrix
     homogenous_points_cam = np.hstack((pc_full,ones))
     homogenous_points_world = world_to_cam_tf @ homogenous_points_cam.T
     points_world = homogenous_points_world[:3,:] / homogenous_points_world[3,:][np.newaxis,:]

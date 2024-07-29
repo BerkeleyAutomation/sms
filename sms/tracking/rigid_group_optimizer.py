@@ -146,19 +146,19 @@ class RigidGroupOptimizer:
 
         # obj_centroid = self.init_p2w_7vec[:,:3]
 
-        for z_rot in np.linspace(0, np.pi * 2, n_seeds):
-            whole_pose_adj = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
-            # x y z qw qx qy qz
-            # z_rot = 0
-            quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
-            whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
-            whole_pose_adj[:, 3:] = quat
-            loss, final_poses = try_opt(whole_pose_adj, niter, False, render)
-            if loss is not None and loss < best_loss:
-                best_loss = loss
-                # best_outputs = outputs
-                best_poses = final_poses
-        _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
+        # for z_rot in np.linspace(0, np.pi * 2, n_seeds):
+        whole_pose_adj = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
+        # x y z qw qx qy qz
+        z_rot = 0
+        quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
+        whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
+        whole_pose_adj[:, 3:] = quat
+        loss, final_poses = try_opt(whole_pose_adj, niter, False, render)
+        if loss is not None and loss < best_loss:
+            best_loss = loss
+            # best_outputs = outputs
+            best_poses = final_poses
+        # _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_poses,

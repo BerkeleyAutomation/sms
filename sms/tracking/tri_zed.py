@@ -262,6 +262,25 @@ class Zed():
             translation=np.array([0.06, 0.042, -0.035]),
         )
 
+    def prime_get_frame(self):
+        res = sl.Resolution()
+        res.width = self.width
+        res.height = self.height
+        if self.cam.grab() == sl.ERROR_CODE.SUCCESS:
+            left_rgb = sl.Mat()
+            right_rgb = sl.Mat()
+            self.cam.retrieve_image(left_rgb, sl.VIEW.LEFT)
+            self.cam.retrieve_image(right_rgb, sl.VIEW.RIGHT)
+            self.height = self.height - self.height % 32
+            self.width = self.width - self.width % 32
+            left_cropped = np.flip(left_rgb.get_data()[:self.height,:self.width,:3], axis=2).copy()
+            right_cropped = np.flip(right_rgb.get_data()[:self.height,:self.width,:3], axis=2).copy()
+            with self.raft_lock:
+                tridepth, disparity, disparity_sparse,cropped_rgb = self.model.inference(rgb_left=format_image(left_cropped),rgb_right=format_image(right_cropped),intrinsics=self.intrinsics_,baseline=self.baseline_)
+            return left_cropped,right_cropped
+        else:
+            print("Couldn't grab frame")
+            
     def get_frame(
         self, depth=True
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
