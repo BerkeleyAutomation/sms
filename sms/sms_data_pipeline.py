@@ -504,7 +504,7 @@ class smsdataPipeline(VanillaPipeline):
             
             sphere_inds_keep = [(torch.where(keep_inds_list == torch.tensor(sphere_inds)[i])[0]).item() for i in sphere_ind_vote.tolist()]
             # Secondary clustering in cartesian space to filter outliers
-            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.008, min_points=1)
+            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.013, min_points=1)
             inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
             keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
             keep_list = [keep_inds_list[keep_inds_list_inner]]
