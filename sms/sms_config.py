@@ -21,7 +21,8 @@ from nerfstudio.data.dataparsers.colmap_dataparser import ColmapDataParserConfig
 # from sms.sms_pipeline import smsPipelineConfig
 from sms.sms_data_pipeline import smsdataPipelineConfig
 # from sms.data.sms_datamanager import smsDataManagerConfig, smsDataManager
-from sms.data.full_images_datamanager import FullImageDatamanagerConfig
+from sms.data.full_images_datamanager import FullImageDatamanagerConfig, FullImageDatamanager
+from sms.data.depth_dataset import DepthDataset
 # from sms.data.sms_dataparser import smsDataParserConfig
 # from sms.data.sms_dataset import smsDataset
 
@@ -109,7 +110,8 @@ sms_data_method = MethodSpecification(
         gradient_accumulation_steps = {'camera_opt': 100,'color':10,'shs':10, 'lerf': 3},  
         pipeline=smsdataPipelineConfig(
             datamanager=FullImageDatamanagerConfig(
-                dataparser=NerfstudioDataParserConfig(load_3D_points=True, orientation_method='none', center_method='none', auto_scale_poses=False),
+                _target=FullImageDatamanager[DepthDataset],
+                dataparser=NerfstudioDataParserConfig(load_3D_points=True, orientation_method='none', center_method='none', auto_scale_poses=False, depth_unit_scale_factor=1.0),
                 network=OpenCLIPNetworkConfig(
                     clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512, device='cuda:0'
                 ),

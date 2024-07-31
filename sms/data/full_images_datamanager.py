@@ -427,8 +427,9 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
 
         data = deepcopy(self.cached_train[image_idx])
+        if image_idx == 0:
+            data.pop('depth_image') # we ignore the first depth image since it's interpolated from ZED2
         data["image"] = data["image"].to(self.device)
-
         assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.train_dataset.cameras[image_idx : image_idx + 1].to(self.device)
         if camera.metadata is None:

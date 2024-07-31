@@ -56,6 +56,8 @@ from nerfstudio.viewer.viewer_elements import ViewerButton, ViewerSlider, Viewer
 from sms.fields.gaussian_field import GaussianField
 from sms.encoders.image_encoder import BaseImageEncoder
 from sms.field_components.gaussian_fieldheadnames import GaussianFieldHeadNames
+from nerfstudio.model_components import losses
+from sms.model_components.losses import DepthLossType, mse_depth_loss, depth_ranking_loss, pearson_correlation_depth_loss
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 from nerfstudio.utils.colormaps import apply_colormap
 import viser.transforms as vtf
@@ -202,7 +204,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """maximum degree of spherical harmonics to use"""
     clip_loss_weight: float = 0.1
     """weight of clip loss"""
-    use_scale_regularization: bool = False
+    use_scale_regularization: bool = True
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
     max_gauss_ratio: float = 5.0
     """threshold of ratio of gaussian max to min scale before applying regularization
@@ -220,7 +222,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     However, PLY exported with antialiased rasterize mode is not compatible with classic mode. Thus many web viewers that
     were implemented for classic mode can not render antialiased mode PLY properly without modifications.
     """
-    camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="off"))
+    camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="SE3"))
     """Config of the camera optimizer to use"""
     gaussian_dim:int = 64
     """Dimension the gaussians actually store as features"""
@@ -230,7 +232,11 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """How much to upscale rendered dino for supervision"""
     min_mask_screensize: float = 0.003
     """Minimum screen size of masks to use for supervision"""
-
+    depth_loss_mult: float = 0.0003
+    """Lambda of the depth loss."""
+    depth_loss_type: DepthLossType = DepthLossType.MSE
+    """Depth loss type."""
+    
 class smsGaussianSplattingModel(SplatfactoModel):
     """Nerfstudio's implementation of Gaussian Splatting
 
@@ -392,96 +398,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
             return distances.astype(np.float32), indices
         else:
             return distances[:, 1:].astype(np.float32), indices[:, 1:].astype(np.float32)
-        
-    def add_new_params_to_optimizer(self, optimizer, new_param_groups):
-        """
-        Adds new parameters to the optimizer, initializing necessary states.
-
-        Args:
-            optimizer (torch.optim.Optimizer): The existing optimizer.
-            new_param_groups (dict): A dictionary of new parameters to add, categorized by group.
-        """
-        num_new = new_param_groups[0].shape[0]
-        
-        param = optimizer.param_groups[0]["params"][0]
-
-        param_state = optimizer.state[param]
-        
-
-        repeat_dims = (num_new,) + tuple(1 for _ in range(param_state["exp_avg"].dim() - 1))
-
-        
-        param_state["exp_avg"] = torch.cat(
-            [param_state["exp_avg"], torch.ones_like(param_state["exp_avg"][-1]).repeat(*repeat_dims) * 0.4],
-            dim=0,
-        )
-        param_state["exp_avg_sq"] = torch.cat(
-            [
-                param_state["exp_avg_sq"],
-                torch.ones_like(param_state["exp_avg_sq"][-1]).repeat(*repeat_dims) * 0.4,
-            ],
-            dim=0,
-        )
-
-        del optimizer.state[param]
-        optimizer.state[new_param_groups[0]] = param_state
-
-        optimizer.param_groups[0]["params"] = new_param_groups
-        del param
-
-    def add_deprojected_means(self, deprojected, colors, optimizers: Optimizers, step):
-        if len(deprojected) > 0:
-            with torch.no_grad():
-
-                deprojected = deprojected[0]
-                colors = colors[0]
-                numpts = len(deprojected)
-                avg_dist = torch.ones_like(deprojected.mean(dim=-1).unsqueeze(-1)) * 0.02 #* 0.01
-
-                dim_sh = num_sh_bases(self.config.sh_degree)
-                if colors.max() > 1.0:
-                    colors = colors / 255
-                    assert colors.max() <= 1.0
-                
-                shs = torch.zeros((colors.shape[0], dim_sh, 3)).float().cuda()
-                if self.config.sh_degree > 0:
-                    shs[:, 0, :3] = RGB2SH(colors)
-                    shs[:, 1:, 3:] = 0.0
-                else:
-                    CONSOLE.log("use color only optimization with sigmoid activation")
-                    shs[:, 0, :3] = torch.logit(colors, eps=1e-10)
-
-                self.gauss_params['means'] = torch.nn.Parameter(torch.cat([self.gauss_params['means'].detach(), deprojected], dim=0))
-                self.gauss_params['scales'] = torch.nn.Parameter(torch.cat([self.gauss_params['scales'].detach(), torch.log(avg_dist.repeat(1, 3)).float().cuda()], dim=0))
-                self.gauss_params['quats'] = torch.nn.Parameter(torch.cat([self.gauss_params['quats'].detach(), random_quat_tensor(numpts).float().cuda()]))
-                self.gauss_params['features_dc'] = torch.nn.Parameter(torch.cat([self.gauss_params['features_dc'].detach(), shs[:, 0, :].to(self.device)]))
-                self.gauss_params['features_rest'] = torch.nn.Parameter(torch.cat([self.gauss_params['features_rest'].detach(), shs[:, 1:, :].to(self.device)]))
-                self.gauss_params['opacities'] = torch.nn.Parameter(torch.cat([self.gauss_params['opacities'].detach(), torch.logit(self.config.init_opacity * torch.ones(numpts, 1)).to(self.device)], dim=0))
-
-                self.xys_grad_norm = None
-                self.vis_counts = None
-                self.max_2Dsize = None
-                
-                num_new_points = deprojected.shape[0]
-                
-                # Adding only the new parameters to the optimizer
-                # new_gaussian_params = [new_means, new_scales, new_quats, new_colors_all, new_opacities]
-                param_groups = self.get_gaussian_param_groups()
-                for group, param in param_groups.items():
-                    if group == 'lerf':
-                        continue
-                    new_param = [param[0][-num_new_points:]]
-                    self.add_new_params_to_optimizer(optimizers.optimizers[group], new_param)
-
-            colors = colors.detach()
-            deprojected = deprojected.detach()
-            del colors
-            del deprojected
-            torch.cuda.empty_cache()
-            self.deprojected_new.clear()
-            self.colors_new.clear()
-            self.steps_since_add = 0
-            self.postBA = True
 
     def remove_from_optim(self, optimizer, deleted_mask, new_params):
         """removes the deleted_mask from the optimizer provided"""
@@ -749,13 +665,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 self.refinement_after,
                 update_every_num_iters=self.config.refine_every,
                 args=[training_callback_attributes.optimizers],
-            )
-        )
-        cbs.append(
-            TrainingCallback(
-                [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
-                self.add_deprojected_means,
-                args=[self.deprojected_new, self.colors_new, training_callback_attributes.optimizers],
             )
         )
         return cbs
@@ -1083,6 +992,13 @@ class smsGaussianSplattingModel(SplatfactoModel):
         # return {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "clip": clip_im, "clip_scale": clip}  # type: ignore
         return outputs
     
+    def reshape_termination_depth(self, termination_depth, output_depth_shape):
+        termination_depth = F.interpolate(termination_depth.permute(2, 0, 1).unsqueeze(0), size=(output_depth_shape[0], output_depth_shape[1]), mode='bilinear', align_corners=False)
+        # Remove the extra dimensions added by unsqueeze and permute
+        termination_depth = termination_depth.squeeze(0).permute(1, 2, 0)
+        return termination_depth
+
+
     def get_gt_img(self, image: torch.Tensor):
         """Compute groundtruth image with iteration dependent downscale factor for evaluation purpose
 
@@ -1122,6 +1038,40 @@ class smsGaussianSplattingModel(SplatfactoModel):
         metrics_dict["gaussian_count"] = self.num_points
 
         self.camera_optimizer.get_metrics_dict(metrics_dict)
+        
+        output_depth_shape = outputs["depth"].shape[:2]
+        
+        if self.training and "depth_image" in batch:
+            if (
+                losses.FORCE_PSEUDODEPTH_LOSS
+                and self.config.depth_loss_type not in losses.PSEUDODEPTH_COMPATIBLE_LOSSES
+            ):
+                raise ValueError(
+                    f"Forcing pseudodepth loss, but depth loss type ({self.config.depth_loss_type}) must be one of {losses.PSEUDODEPTH_COMPATIBLE_LOSSES}"
+                )
+            if self.config.depth_loss_type in (DepthLossType.MSE,):
+                metrics_dict["depth_loss"] = torch.Tensor([0.0]).to(self.device)
+                termination_depth = batch["depth_image"].to(self.device)
+                termination_depth = self.reshape_termination_depth(termination_depth, output_depth_shape)
+
+                metrics_dict["depth_loss"] = mse_depth_loss(
+                    termination_depth, outputs["depth"])
+            
+            elif self.config.depth_loss_type in (DepthLossType.PEARSON_LOSS,):
+                metrics_dict["depth_loss"] = torch.Tensor([0.0]).to(self.device)
+                termination_depth = batch["depth_image"].to(self.device)
+                termination_depth = self.reshape_termination_depth(termination_depth, output_depth_shape)
+                
+                metrics_dict["depth_loss"] = pearson_correlation_depth_loss(
+                    termination_depth, outputs["depth"])
+            
+            elif self.config.depth_loss_type in (DepthLossType.SPARSENERF_RANKING,):
+                metrics_dict["depth_ranking"] = depth_ranking_loss(
+                    outputs["depth"], batch["depth_image"].to(self.device)
+                )
+            else:
+                raise NotImplementedError(f"Unknown depth loss type {self.config.depth_loss_type}")
+            
         return metrics_dict
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
@@ -1162,14 +1112,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
                             F.relu(margin - torch.norm(outputs["instance"][mask[idx[i]]].mean(dim=0) - outputs["instance"][mask[idx[i+1]]].mean(dim=0), p=2, dim=-1))).nansum()
                         count += 1
                         
-                    # instance_loss = instance_loss / count
-                    # for i in range(len(mask)-1):
-                    #     if (mask[i].sum()/total_ray_count <= self.config.min_mask_screensize):
-                    #         continue
-                    #     instance_loss += (
-                    #         F.relu(margin - torch.norm(outputs["instance"][mask[i]].mean(dim=0) - outputs["instance"][mask[-1]].mean(dim=0), p=2, dim=-1))).nansum()
-                    #     count += 1
-                    
                     # Encourage features within a mask to be close to each other
                     for i in range(len(mask)):
                         if (mask[i].sum()/total_ray_count <= self.config.min_mask_screensize):
@@ -1194,7 +1136,17 @@ class smsGaussianSplattingModel(SplatfactoModel):
             # encourage the nearest neighbors to have similar dino feats
             if self.step > (self.datamanager.dino_step+1000):
                 loss_dict['dino_nn_loss'] = .01*self.gauss_params['dino_feats'][self.nearest_ids].var(dim=1).sum()
-
+        if 'depth' in outputs and 'depth_image' in batch:
+            assert metrics_dict is not None and ("depth_loss" in metrics_dict or "depth_ranking" in metrics_dict)
+            if "depth_ranking" in metrics_dict:
+                loss_dict["depth_ranking"] = (
+                    self.config.depth_loss_mult
+                    * np.interp(self.step, [0, 2000], [0, 0.2])
+                    * metrics_dict["depth_ranking"]
+                )
+            
+            if "depth_loss" in metrics_dict:
+                loss_dict["depth_loss"] = self.config.depth_loss_mult * metrics_dict["depth_loss"]
         return loss_dict
 
     @torch.no_grad()

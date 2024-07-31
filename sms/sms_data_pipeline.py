@@ -468,7 +468,7 @@ class smsdataPipeline(VanillaPipeline):
         table_bounding_cube_filename = self.datamanager.get_datapath().joinpath("table_bounding_cube.json")
         with open(table_bounding_cube_filename, 'r') as json_file: 
             bounding_box_dict = json.load(json_file)
-        table_z_val = bounding_box_dict['table_height'] + 0.008 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
+        table_z_val = bounding_box_dict['table_height'] + 0.002 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
         # table_z_val = -0.165 # z value of the table to filter out of our clusters
         keep_list = [keep_list[0][torch.where(curr_means[keep_list[0]][:,2] > table_z_val)[0].cpu()]] # filter out table points
         # Remove the click handle + visualization

@@ -39,19 +39,21 @@ from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
 
 # Detic libraries 
-from sms.data.utils.Detic.detic.modeling.text.text_encoder import build_text_encoder
+# from sms.data.utils.Detic.detic.modeling.text.text_encoder import build_text_encoder
 from collections import defaultdict
 from centernet.config import add_centernet_config
 from sms.data.utils.Detic.detic.config import add_detic_config
 from sms.data.utils.Detic.detic.modeling.utils import reset_cls_test
 from sklearn.cluster import DBSCAN
 import matplotlib.patches as patches
-from segment_anything import sam_model_registry, SamPredictor
+# from segment_anything import sam_model_registry, SamPredictor
+from sam2.build_sam import build_sam2
+from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 class DeticDataloader():
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.sam = False
+        self.samv2 = False
         # image_list: torch.Tensor = None,
         self.out_list = [],
     
@@ -68,14 +70,13 @@ class DeticDataloader():
         # cfg.MODEL.DEVICE='cpu' # uncomment this to use cpu-only mode.
         self.detic_predictor = DefaultPredictor(cfg)
 
-        if self.sam == True:
-            sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
-            model_type = "vit_h"
-            sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-            sam.to(device=self.device)
+        if self.samv2 == True:
+            checkpoint = "/home/lifelong/sms/sms/data/utils/segment-anything-2/checkpoints/sam2_hiera_large.pt"
+            model_cfg = "sam2_hiera_l.yaml"
+            self.sam_predictor = SAM2ImagePredictor(build_sam2(model_cfg, checkpoint))
+            # sam_predictor.to(device=self.device)
             print('SAM + Detic on device: ', self.device)
-            self.sam_predictor = SamPredictor(sam)
-        self.text_encoder = build_text_encoder(pretrain=True)
+        # self.text_encoder = build_text_encoder(pretrain=True)
 
         if image_list is not None:
             # return NotImplementedError
@@ -150,11 +151,11 @@ class DeticDataloader():
         num_classes = len(self.metadata.thing_classes)
         reset_cls_test(self.detic_predictor.model, classifier, num_classes)
 
-    def get_clip_embeddings(self, vocabulary, prompt='a '):
-        self.text_encoder.eval()
-        texts = [prompt + x for x in vocabulary]
-        emb = self.text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
-        return emb
+    # def get_clip_embeddings(self, vocabulary, prompt='a '):
+    #     self.text_encoder.eval()
+    #     texts = [prompt + x for x in vocabulary]
+    #     emb = self.text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
+    #     return emb
 
     # def SAM_predictors(self, device):
     #     sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
@@ -165,16 +166,18 @@ class DeticDataloader():
     #     self.sam_predictor = SamPredictor(sam)
     
     def SAM(self, im, boxes, class_idx = None, metadata = None):
-        self.sam_predictor.set_image(im)
-        input_boxes = torch.tensor(boxes, device=self.sam_predictor.device)
-        transformed_boxes = self.sam_predictor.transform.apply_boxes_torch(input_boxes, im.shape[:2])
-        masks, _, _ = self.sam_predictor.predict_torch(
-            point_coords=None,
-            point_labels=None,
-            boxes=transformed_boxes,
-            multimask_output=False,
-        )
-        return masks
+        # print(len(boxes))
+        masks = []
+        for box in boxes:
+            self.sam_predictor.set_image(im)
+            # input_boxes = torch.tensor(boxes, device=self.sam_predictor.device)
+            import pdb; pdb.set_trace()
+            mask, _, _ = self.sam_predictor.predict(
+                box=box,
+                multimask_output=False,
+            )
+            masks.append(mask)
+        return np.array(masks)
 
     def visualize_detic(self, output):
         output_im = output.get_image()[:, :, ::-1]
@@ -217,13 +220,14 @@ class DeticDataloader():
 
         masks = None
         components = torch.zeros(H, W)
-        if self.sam:
+        if self.samv2:
             if len(boxes) > 0:
                 # Only run SAM if there are bboxes
                 masks = self.SAM(im, boxes)
                 for i in range(masks.shape[0]):
                     if torch.sum(masks[i][0]) <= H*W/3.5:
                         components[masks[i][0]] = i + 1
+                
         else:
             masks = output['instances'].pred_masks.unsqueeze(1)
             for i in range(masks.shape[0]):

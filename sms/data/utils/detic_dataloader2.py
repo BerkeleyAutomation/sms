@@ -40,7 +40,7 @@ from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
 
 # Detic libraries 
-from sms.data.utils.Detic.detic.modeling.text.text_encoder import build_text_encoder
+# from sms.data.utils.Detic.detic.modeling.text.text_encoder import build_text_encoder
 from collections import defaultdict
 from centernet.config import add_centernet_config
 from sms.data.utils.Detic.detic.config import add_detic_config
@@ -87,7 +87,7 @@ class DeticDataloader(FeatureDataloader):
             sam.to(device=self.device)
             print('SAM + Detic on device: ', self.device)
             self.sam_predictor = SamPredictor(sam)
-        self.text_encoder = build_text_encoder(pretrain=True)
+        # self.text_encoder = build_text_encoder(pretrain=True)
         if len(self.cstm_vocab) > 0:
             print("Using custom vocabulary with classes: ", self.cstm_vocab)
             self.custom_vocab(self.cstm_vocab)
