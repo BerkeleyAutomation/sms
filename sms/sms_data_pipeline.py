@@ -15,35 +15,17 @@ from nerfstudio.pipelines.base_pipeline import (
     VanillaPipelineConfig,
 )
 import trimesh
-# from nerfstudio.data.scene_box import OrientedBox
-
-# from sms.data.sms_datamanager import (
-#     smsDataManager,
-#     smsDataManagerConfig,
-# )
-
-# import viser
-# import viser.transforms as vtf
-# import trimesh
-# import open3d as o3d
-# import cv2
-# from copy import deepcopy
+import viser
 
 from dataclasses import dataclass, field
 from nerfstudio.cameras.cameras import Cameras
-from nerfstudio.viewer.viewer_elements import ViewerCheckbox
 from nerfstudio.models.base_model import ModelConfig
 from sms.data.utils.patch_embedding_dataloader import PatchEmbeddingDataloader
-# from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
 from sms.model.sms_gaussian_splatting import smsGaussianSplattingModelConfig, SH2RGB
-# from sms.monodepth.zoedepth_network import ZoeDepthNetworkConfig
 from torch.cuda.amp.grad_scaler import GradScaler
 from torchvision.transforms.functional import resize
 from nerfstudio.configs.base_config import InstantiateConfig
-# from lerf.utils.camera_utils import deproject_pixel, get_connected_components, calculate_overlap, non_maximum_suppression
 from sms.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
-# from gsplat.sh import spherical_harmonics, num_sh_bases
-# from gsplat.cuda_legacy._wrapper import num_sh_bases
 from sms.data.full_images_datamanager import FullImageDatamanagerConfig
 from sklearn.neighbors import NearestNeighbors
 
@@ -53,16 +35,14 @@ from scipy.spatial.transform import Rotation as Rot
 from typing import Literal, Type, Optional, List, Tuple, Dict
 from nerfstudio.viewer.viewer_elements import *
 import torch
-import torch.nn.functional as F
-import torch.multiprocessing as mp
-import matplotlib.pyplot as plt
 import numpy as np 
-import cv2
 import math
 from scipy.spatial.distance import cdist
 import open3d as o3d
-import tqdm
-
+import os
+import os.path as osp
+import time
+import threading
 
 def random_quat_tensor(N):
     """
@@ -251,34 +231,100 @@ class smsdataPipeline(VanillaPipeline):
             )
 
 
-    # this only calcualtes the features for the given image
-    def add_image(
-        self,
-        img: torch.Tensor, 
-        pose: Cameras = None, 
-    ):
-
-        self.datamanager.add_image(img)
-        # self.img_count += 1
-
-    # this actually adds the image to the datamanager + dataset...?
-    # @profile
-    def process_image(
-        self,
-        img: torch.Tensor, 
-        depth: torch.Tensor,
-        pose: Cameras, 
-        clip: dict,
-        dino,
-        downscale_factor = 1,
-    ):
-        print("Adding image to train dataset",pose.camera_to_worlds[:3,3].flatten())
+        self.group_labels_local, self.group_masks_local, self.group_masks_global = None, None, None
         
-        self.datamanager.process_image(img, depth, pose, clip, dino, downscale_factor)
-        self.img_count += 1
+        self.traj_dirs = []
+        self.traj_dir = self.config.datamanager.data
+        # output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
+        # self.traj_dir  = Path(output_dir)
+        for root, dirs, files in os.walk(self.traj_dir):
+            for dir in dirs:
+                if dir.startswith("traj-"):
+                    self.traj_dirs.append(dir)
+        if len(self.traj_dirs) > 0:
+            self.load_traj_file = ViewerDropdown("Load File", default_value=self.traj_dirs[-1], options=self.traj_dirs, cb_hook=self._load_traj_file)
+            self.traj_file = Path(osp.join(self.traj_dir, self.traj_dirs[-1], "part_deltas_traj.npy"))
+            if self.traj_file.exists():
+                self.traj = np.load(self.traj_file, allow_pickle=True)
+                # assert self.traj.shape[-1] == len(self.group_masks_local), f"Number of objects ({self.traj.shape[-1]}) tracked in trajectory file {self.traj_file} does not match number of current group masks ({len(self.group_masks_local)})"
+                self.preview_frame_slider = ViewerSlider("Preview Frame", min_value=0, max_value=self.traj.shape[0] - 1, step=1, default_value=0, cb_hook=self._preview_frame_slider)
+                self.play_button = ViewerButton("Play", cb_hook=self._play_button)
+                self.pause_button = ViewerButton("Pause", cb_hook=self._pause_button)
+                self.framerate_number = ViewerNumber("FPS", default_value=3.0)
+                self.framerate_buttons = ViewerButtonGroup("", default_value=3, options = ("3", "5", "10"), cb_hook=self._framerate_buttons)
 
-    def add_to_clip(self, clip: dict, step: int):
-        self.datamanager.add_to_clip(clip, step)
+            # assert self.traj.shape[-1] == len(self.group_masks_local), f"Number of objects ({self.traj.shape[-1]}) tracked in trajectory file {self.traj_file} does not match number of current group masks ({len(self.group_masks_local)})"
+
+    def _framerate_buttons(self, button: ViewerButtonGroup) -> None:
+        self.framerate_number.value = float(self.framerate_buttons.value)
+    
+    def _play_button(self, button: ViewerButton) -> None:
+        self.pause = False
+        assert self.traj_file.exists(), f"Trajectory file {self.traj_file} does not exist"
+        
+        def play() -> None:
+            # pass
+            while self.pause == False:
+                max_frame = int(self.traj.shape[0])
+                if max_frame > 0:
+                    assert self.preview_frame_slider is not None
+                    self.preview_frame_slider.value = (self.preview_frame_slider.value + 1) % max_frame
+                time.sleep(1.0 / self.framerate_number.value)
+
+        threading.Thread(target=play).start()
+
+    # Pause the trajectory when the pause button is pressed.
+    def _pause_button(self, button: ViewerButton) -> None:
+        self.pause = True
+        
+    def _preview_frame_slider(self, slider: ViewerSlider) -> None:
+        assert self.traj_file.exists(), f"Trajectory file {self.traj_file} does not exist"
+        frame = self.traj[self.preview_frame_slider.value]
+        # import pdb; pdb.set_trace()
+        xyz0 = self.traj[0]
+        
+        for i, mask in enumerate(self.group_masks_local):
+            rigid_transform_mat = frame[i].as_matrix()
+            rigid_transform_mat[:3,3] = rigid_transform_mat[:3,3] - xyz0[i].translation()
+            # print(f"Object {i}: ", rigid_transform_mat)
+            means_centered = torch.subtract(self.init_means[mask], self.init_means[mask].mean(dim=0))
+            means_centered_homog = torch.cat([means_centered, torch.ones(means_centered.shape[0], 1).to(self.device)], dim=1)
+            # import pdb; pdb.set_trace()
+            self.model.gauss_params["means"][mask] = ((torch.from_numpy(rigid_transform_mat).to(torch.float32).cuda() @ means_centered_homog.T).T)[:, :3] + self.init_means[mask].mean(dim=0)
+            self.model.gauss_params["quats"][mask] = torch.Tensor(
+                Rot.from_matrix(
+                torch.matmul(torch.from_numpy(frame[i].as_matrix()[:3,:3]).to(torch.float32).cuda(), quat_to_rotmat(self.init_quats[mask])).cpu()
+                ).as_quat()).to(self.device)[:, [3, 0, 1, 2]]
+                
+        self.viewer_control.viewer._trigger_rerender()
+
+    # this only calcualtes the features for the given image
+    # TODO: see if these are still used -- if not, remove them
+    # def add_image(
+    #     self,
+    #     img: torch.Tensor, 
+    #     pose: Cameras = None, 
+    # ):
+
+    #     self.datamanager.add_image(img)
+
+    # # this actually adds the image to the datamanager + dataset
+    # def process_image(
+    #     self,
+    #     img: torch.Tensor, 
+    #     depth: torch.Tensor,
+    #     pose: Cameras, 
+    #     clip: dict,
+    #     dino,
+    #     downscale_factor = 1,
+    # ):
+    #     print("Adding image to train dataset",pose.camera_to_worlds[:3,3].flatten())
+        
+    #     self.datamanager.process_image(img, depth, pose, clip, dino, downscale_factor)
+    #     self.img_count += 1
+
+    # def add_to_clip(self, clip: dict, step: int):
+    #     self.datamanager.add_to_clip(clip, step)
 
     def _queue_state(self):
         """Save current state to stack"""
@@ -468,7 +514,7 @@ class smsdataPipeline(VanillaPipeline):
         table_bounding_cube_filename = self.datamanager.get_datapath().joinpath("table_bounding_cube.json")
         with open(table_bounding_cube_filename, 'r') as json_file: 
             bounding_box_dict = json.load(json_file)
-        table_z_val = bounding_box_dict['table_height'] + 0.002 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
+        table_z_val = bounding_box_dict['table_height'] + 0.008 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
         # table_z_val = -0.165 # z value of the table to filter out of our clusters
         keep_list = [keep_list[0][torch.where(curr_means[keep_list[0]][:,2] > table_z_val)[0].cpu()]] # filter out table points
         # Remove the click handle + visualization
@@ -608,76 +654,7 @@ class smsdataPipeline(VanillaPipeline):
             np.save(filename, np.array([self.model.cluster_labels, self.keep_inds], dtype=object))
         else:
             print("No cluster labels to export")
-            
-    # def _export_visible_gaussians(self, button: ViewerButton):
-    #     """Export the visible gaussians to a .ply file"""
-    #     # location to save
-    #     output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
-    #     filename = Path(output_dir) / f"gaussians.ply"
-
-    #     # Copied from exporter.py
-    #     from collections import OrderedDict
-    #     map_to_tensors = OrderedDict()
-    #     model=self.model
-
-    #     with torch.no_grad():
-    #         positions = model.means.cpu().numpy()
-    #         count = positions.shape[0]
-    #         n = count
-    #         map_to_tensors["x"] = positions[:, 0]
-    #         map_to_tensors["y"] = positions[:, 1]
-    #         map_to_tensors["z"] = positions[:, 2]
-    #         map_to_tensors["nx"] = np.zeros(n, dtype=np.float32)
-    #         map_to_tensors["ny"] = np.zeros(n, dtype=np.float32)
-    #         map_to_tensors["nz"] = np.zeros(n, dtype=np.float32)
-
-    #         if model.config.sh_degree > 0:
-    #             shs_0 = model.shs_0.contiguous().cpu().numpy()
-    #             for i in range(shs_0.shape[1]):
-    #                 map_to_tensors[f"f_dc_{i}"] = shs_0[:, i, None]
-                    
-    #             assert shs_0.shape[1] == 3
-    #             map_to_tensors[f"red"] = np.array(SH2RGB(shs_0[:, 0])*255).astype(np.uint8)
-    #             map_to_tensors[f"green"] = np.array(SH2RGB(shs_0[:, 1])*255).astype(np.uint8)
-    #             map_to_tensors[f"blue"] = np.array(SH2RGB(shs_0[:, 2])*255).astype(np.uint8)
-
-    #             # transpose(1, 2) was needed to match the sh order in Inria version
-    #             shs_rest = model.shs_rest.transpose(1, 2).contiguous().cpu().numpy()
-    #             shs_rest = shs_rest.reshape((n, -1))
-    #             for i in range(shs_rest.shape[-1]):
-    #                 map_to_tensors[f"f_rest_{i}"] = shs_rest[:, i, None]
-    #         else:
-    #             colors = torch.clamp(model.colors.clone(), 0.0, 1.0).data.cpu().numpy()
-    #             map_to_tensors["colors"] = (colors * 255).astype(np.uint8)
-
-    #         map_to_tensors["opacity"] = model.opacities.data.cpu().numpy()
-
-    #         scales = model.scales.data.cpu().numpy()
-    #         for i in range(3):
-    #             map_to_tensors[f"scale_{i}"] = scales[:, i, None]
-
-    #         quats = model.quats.data.cpu().numpy()
-    #         for i in range(4):
-    #             map_to_tensors[f"rot_{i}"] = quats[:, i, None]
-
-    #     # post optimization, it is possible have NaN/Inf values in some attributes
-    #     # to ensure the exported ply file has finite values, we enforce finite filters.
-    #     select = np.ones(n, dtype=bool)
-    #     for k, t in map_to_tensors.items():
-    #         n_before = np.sum(select)
-    #         select = np.logical_and(select, np.isfinite(t).all(axis=-1))
-    #         n_after = np.sum(select)
-    #         if n_after < n_before:
-    #             CONSOLE.print(f"{n_before - n_after} NaN/Inf elements in {k}")
-
-    #     if np.sum(select) < n:
-    #         CONSOLE.print(f"values have NaN/Inf in map_to_tensors, only export {np.sum(select)}/{n}")
-    #         for k, t in map_to_tensors.items():
-    #             map_to_tensors[k] = map_to_tensors[k][select]
-    #         count = np.sum(select)
-    #     from nerfstudio.scripts.exporter import ExportGaussianSplat
-    #     ExportGaussianSplat.write_ply(str(filename), count, map_to_tensors)
-
+    
     def _export_visible_gaussians(self, button: ViewerButton):
         """Export the visible gaussians to a .ply file"""
         output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
@@ -724,3 +701,11 @@ class smsdataPipeline(VanillaPipeline):
             pcd.colors = o3d.utility.Vector3dVector(normalized_colors)
             o3d.io.write_point_cloud(str(full_filename),pcd)
         
+    def _load_traj_file(self, dropdown: ViewerDropdown) -> None:
+        """Load a trajectory file"""
+        self.traj_file = Path(osp.join(self.traj_dir, self.load_traj_file.value, "part_deltas_traj.npy"))
+        if self.traj_file.exists():
+            self.traj = np.load(self.traj_file, allow_pickle=True)
+            self.preview_frame_slider.remove()
+            self.preview_frame_slider = ViewerSlider("Preview Frame", min_value=0, max_value=self.traj.shape[0] - 1, step=1, default_value=0, cb_hook=self._preview_frame_slider)
+            self.preview_frame_slider.install(self.viewer_control.viser_server)

@@ -981,8 +981,13 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 rasterize_mode=self.config.rasterize_mode,
             )
             feat_shape = dino_feats.shape
+            if torch.isnan(dino_alpha).any() or torch.isinf(dino_alpha).any():
+                print("NaNs or Infs detected in dino_alpha")
+            if torch.isnan(dino_feats).any() or torch.isinf(dino_feats).any():
+                print("NaNs or Infs detected in dino_feats")
+            dino_alpha_clamped = torch.clamp(dino_alpha, min=1e-6)
 
-            dino_feats = torch.where(dino_alpha > 0, dino_feats / dino_alpha.detach(), torch.zeros(self.config.gaussian_dim, device=self.device))
+            dino_feats = torch.where(dino_alpha > 0, dino_feats / dino_alpha_clamped.detach(), torch.zeros(self.config.gaussian_dim, device=self.device))
             nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
             dino_feats = self.nn(nn_inputs).view(*feat_shape[:-1],-1)
             if not self.training:

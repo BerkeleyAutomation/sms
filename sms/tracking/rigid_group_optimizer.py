@@ -37,6 +37,7 @@ class RigidGroupOptimizerConfig:
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
+    clip_grad: float = 0.8
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -45,7 +46,6 @@ class RigidGroupOptimizer:
         self,
         config: RigidGroupOptimizerConfig,
         sms_model: smsGaussianSplattingModel,
-        # dino_loader: DinoDataloader,
         group_masks: List[torch.Tensor],
         group_labels: torch.Tensor,
         dataset_scale: float,
@@ -56,6 +56,7 @@ class RigidGroupOptimizer:
         This one takes in a list of gaussian ID masks to optimize local poses for
         Each rigid group can be optimized independently, with no skeletal constraints
         """
+        torch.autograd.set_detect_anomaly(True)
         self.config = config
         self.use_wandb = use_wandb
         if self.use_wandb:
@@ -131,7 +132,7 @@ class RigidGroupOptimizer:
                 tape = wp.Tape()
                 optimizer.zero_grad()
                 with tape:
-                    loss = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, False)
+                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, False)
                 loss.backward()
                 tape.backward()
                 optimizer.step()
@@ -158,7 +159,7 @@ class RigidGroupOptimizer:
             best_loss = loss
             # best_outputs = outputs
             best_poses = final_poses
-        # _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
+        _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_poses,
@@ -249,7 +250,8 @@ class RigidGroupOptimizer:
     
     def get_initial_part2world(self,i):
         return self.init_p2w[i]
-  
+    
+    # @profile
     def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, do_obj_optim):
         """
         Returns a backpropable loss for the given frame
@@ -267,15 +269,17 @@ class RigidGroupOptimizer:
             object_mask = outputs["accumulation"] > 0.8
         if not object_mask.any():
             return None
-        dino_feats = (
-            self.blur(outputs["dino"].permute(2, 0, 1)[None])
-            .squeeze()
-            .permute(1, 2, 0)
-        )
+        # dino_feats = (
+        #     self.blur(outputs["dino"].permute(2, 0, 1)[None])
+        #     .squeeze()
+        #     .permute(1, 2, 0)
+        # )
         if use_hand_mask:
-            loss = (frame.dino_feats - dino_feats)[frame.hand_mask].norm(dim=-1).mean()
+            loss = (frame.dino_feats - outputs["dino"])[frame.hand_mask].norm(dim=-1).mean()
         else:
-            loss = (frame.dino_feats - dino_feats).norm(dim=-1).mean()
+            import pdb; pdb.set_trace()
+            dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
+            loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
         if self.use_wandb:
             wandb.log({"DINO mse_loss": loss.mean().item()})
@@ -285,38 +289,15 @@ class RigidGroupOptimizer:
                 valids = object_mask & (~frame.depth.isnan())
                 if use_hand_mask:
                     valids = valids & frame.hand_mask.unsqueeze(-1)
-                pix_loss = (physical_depth - frame.depth) ** 2
-                pix_loss = pix_loss[
-                    valids & (pix_loss < self.config.depth_ignore_threshold**2)
-                ]
+
+                physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)[valids]
+                frame_depth_clamped = torch.clamp(frame.depth, min=-1e8, max=2.0)[valids]
+                pix_loss = (physical_depth_clamped - frame_depth_clamped) ** 2
+
                 if self.use_wandb:
                     wandb.log({"depth_loss": pix_loss.mean().item()})
                 if not torch.isnan(pix_loss.mean()).any():
                     loss = loss + pix_loss.mean()
-            else:
-                # This is ranking loss for monodepth (which is disparity)
-                frame_depth = 1 / frame.depth # convert disparity to depth
-                N = 30000
-                # erode the mask by like 10 pixels
-                object_mask = object_mask & (~frame_depth.isnan())
-                object_mask = object_mask & (outputs['depth'] > .05)
-                object_mask = kornia.morphology.erosion(
-                    object_mask.squeeze().unsqueeze(0).unsqueeze(0).float(), torch.ones((self.config.rank_loss_erode, self.config.rank_loss_erode), device='cuda')
-                ).squeeze().bool()
-                if use_hand_mask:
-                    object_mask = object_mask & frame.hand_mask
-                valid_ids = torch.where(object_mask)
-                rand_samples = torch.randint(
-                    0, valid_ids[0].shape[0], (N,), device="cuda"
-                )
-                rand_samples = (
-                    valid_ids[0][rand_samples],
-                    valid_ids[1][rand_samples],
-                )
-                rend_samples = outputs["depth"][rand_samples]
-                mono_samples = frame_depth[rand_samples]
-                rank_loss = depth_ranking_loss(rend_samples, mono_samples)
-                loss = loss + self.config.rank_loss_mult*rank_loss
         if use_rgb:
             rgb_loss = 0.05 * (outputs["rgb"] - frame.rgb).abs().mean()
             loss = loss + rgb_loss
@@ -334,8 +315,10 @@ class RigidGroupOptimizer:
             loss = loss + reg
             if self.use_wandb:
                 wandb.log({"reg_loss": reg.item()})
-        return loss
+                
+        return loss, outputs
         
+    # @profile
     def step(self, niter=1, use_depth=True, use_rgb=False):
         part_scheduler = ExponentialDecayScheduler(
             ExponentialDecaySchedulerConfig(
@@ -353,11 +336,13 @@ class RigidGroupOptimizer:
 
             # Compute loss
             with tape:
-                loss = self.get_optim_loss(self.frame, self.part_deltas, 
+                loss, outputs = self.get_optim_loss(self.frame, self.part_deltas, 
                     use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim)
-            loss.backward()
-            #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
-            tape.backward()
+            if loss is not None:
+                loss.backward()
+                #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
+                tape.backward()
+            torch.nn.utils.clip_grad_norm_(self.part_deltas, self.config.clip_grad)
             self.part_optimizer.step()
             part_scheduler.step()
             part_grad_norms = self.part_deltas.grad.norm(dim=1)
@@ -375,8 +360,8 @@ class RigidGroupOptimizer:
                         self.part_deltas, self.group_labels
                     )
 
-                full_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
-        return {k:i.detach() for k,i in full_outputs.items()}
+        #         full_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
+        return {k:i.detach() for k,i in outputs.items()}
 
     def apply_to_model(self, part_deltas, group_labels):
         """

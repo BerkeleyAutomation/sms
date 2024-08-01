@@ -31,7 +31,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_drill_battery2/sms-data/2024-07-31_032305/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_paper_bowl1/sms-data/2024-07-30_091559/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -153,8 +153,6 @@ def main(
     
     @generate_grasps_handle.on_click
     def _(_):
-        import pdb
-        pdb.set_trace()
         # generate_grasps_handle.disabled = True
         toad_opt.state_to_ply(toad_opt.max_relevancy_label)
         local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
@@ -202,12 +200,6 @@ def main(
                                 [0,1,0,0],
                                 [0,0,1,-0.1],
                                 [0,0,0,1]])
-        # FOR DEMO: TODO CHANGE THIS FROM KUSH
-        grasp_boost = np.array([[1,0,0,0],
-                                [0,1,0,0],
-                                [0,0,1,0.05],
-                                [0,0,0,1]])
-        best_grasp = best_grasp @ grasp_boost
         pre_grasp_world_frame = best_grasp @ pre_grasp_tf
         pre_grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         pre_grasp_point_world.transform(pre_grasp_world_frame)
@@ -225,10 +217,10 @@ def main(
         time.sleep(1)
         robot.move_pose(pre_grasp_rigid_tf,vel=0.5,acc=0.1)
         time.sleep(5)
-        # robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
-        # time.sleep(1)
-        # robot.gripper.open()
-        # time.sleep(3)
+        robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
+        time.sleep(1)
+        robot.gripper.open()
+        time.sleep(3)
 
     real_frames = []
     rendered_rgb_frames = []
@@ -243,17 +235,17 @@ def main(
     while True: # Main tracking loop
         try:
             if zed is not None:
-                # start_time = time.time()
+                start_time = time.time()
                 left, right, depth = zed.get_frame()
                 # print("Got frame in ", time.time()-start_time)
-                # start_time2 = time.time()
+                start_time2 = time.time()
                 assert isinstance(toad_opt, Optimizer)
                 if toad_opt.initialized:
                     start_time3 = time.time()
                     toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
                     print("Set frame in ", time.time()-start_time3)
                     start_time5 = time.time()
-                    n_opt_iters = 20
+                    n_opt_iters = 25
                     with zed.raft_lock:
                         outputs = toad_opt.step_opt(niter=n_opt_iters)
                     print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
@@ -284,6 +276,16 @@ def main(
                         rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
                     
                     tf_list = toad_opt.get_parts2world()
+                    if(len(tf_list) > 0):
+                        object_tf = tf_list[0]
+                        object_translation = object_tf.translation()
+                        current_pose = robot.get_pose()
+                        current_rotation = current_pose.rotation
+                        desired_robot_translation = object_translation + np.array([0,0,0.3])
+                        desired_robot_translation[2] = 0.2
+                        desired_pose = current_pose
+                        desired_pose.translation = desired_robot_translation
+                        robot.move_pose(desired_pose, asyn=True)
                     part_deltas.append(tf_list)
                     for idx, tf in enumerate(tf_list):
                         server.add_frame(
