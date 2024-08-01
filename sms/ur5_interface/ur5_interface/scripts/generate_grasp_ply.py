@@ -23,6 +23,7 @@ full_ply_filepath = "/home/lifelong/sms/sms/data/utils/Detic/outputs/2024_07_22_
 bounding_box_filepath = "/home/lifelong/sms/sms/data/utils/Detic/2024_07_22_green_tape_bowl/table_bounding_cube.json"
 
 def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z_range, K, local_regions, filter_grasps, skip_border_objects, forward_passes, segmap_id, arg_configs, save_dir):
+
     global_config = config_utils.load_config(ckpt_dir, batch_size=forward_passes, arg_configs=arg_configs)
 
     print(str(global_config))
@@ -67,10 +68,7 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     point_cloud_world.points = o3d.utility.Vector3dVector(points_world)
     point_cloud_world.colors = o3d.utility.Vector3dVector(pc_colors)
     coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-    panda_grasp_point_to_robotiq_grasp_point = np.array([[1,0,0,0],
-                                                        [0,1,0,0],
-                                                        [0,0,1,-0.06],
-                                                        [0,0,0,1]])
+    panda_grasp_point_to_robotiq_grasp_point = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,-0.03],[0,0,0,1]]) # -0.06
     final_grasp_world_frame = world_to_cam_tf @ best_grasps[0][0] @ panda_grasp_point_to_robotiq_grasp_point
     grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
     grasp_point_world.transform(final_grasp_world_frame)

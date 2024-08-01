@@ -63,7 +63,6 @@ def main(
     
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
-        
     home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
     world_to_wrist = robot.get_pose()
@@ -153,8 +152,6 @@ def main(
     
     @generate_grasps_handle.on_click
     def _(_):
-        import pdb
-        pdb.set_trace()
         # generate_grasps_handle.disabled = True
         toad_opt.state_to_ply(toad_opt.max_relevancy_label)
         local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
@@ -202,12 +199,7 @@ def main(
                                 [0,1,0,0],
                                 [0,0,1,-0.1],
                                 [0,0,0,1]])
-        # FOR DEMO: TODO CHANGE THIS FROM KUSH
-        grasp_boost = np.array([[1,0,0,0],
-                                [0,1,0,0],
-                                [0,0,1,0.05],
-                                [0,0,0,1]])
-        best_grasp = best_grasp @ grasp_boost
+        
         pre_grasp_world_frame = best_grasp @ pre_grasp_tf
         pre_grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         pre_grasp_point_world.transform(pre_grasp_world_frame)
@@ -216,15 +208,17 @@ def main(
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
         robot.gripper.open()
         time.sleep(1)
-        robot.move_pose(pre_grasp_rigid_tf,vel=0.5,acc=0.1)
+        robot.move_pose(pre_grasp_rigid_tf,vel=1.0,acc=0.1)
         time.sleep(1)
         final_grasp_rigid_tf = RigidTransform(rotation=best_grasp[:3,:3],translation=best_grasp[:3,3])
-        robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
+        robot.move_pose(final_grasp_rigid_tf,vel=1.0,acc=0.1)
         time.sleep(1)
         robot.gripper.close()
         time.sleep(1)
         robot.move_pose(pre_grasp_rigid_tf,vel=0.5,acc=0.1)
-        time.sleep(5)
+        time.sleep(1)
+        center_gripper_joints = np.array([-0.3208115736590784, -2.21897536913027, -2.0295470396624964, -1.0417445341693323, 2.9223015308380127, 1.2413675785064697])
+        robot.move_joint(center_gripper_joints,vel=0.5,acc=0.1)
         # robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
         # time.sleep(1)
         # robot.gripper.open()

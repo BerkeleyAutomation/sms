@@ -105,10 +105,8 @@ class ToadObject:
     ) -> List[np.ndarray]:
         contact_graspnet_env_path = "/home/lifelong/anaconda3/envs/contact_graspnet/bin/python"
         generate_grasps_path = "/home/lifelong/sms/sms/ur5_interface/ur5_interface/scripts/generate_grasp_ply.py"
-        print(contact_graspnet_env_path + " " + generate_grasps_path + '--seg_np_path' + seg_np_path + '--full_np_path' + full_np_path + '--pc_bounding_box_path' + table_bounding_box_path + '--save_dir' + save_dir)
-        import pdb
-        pdb.set_trace()
-        #result = subprocess.run([contact_graspnet_env_path, generate_grasps_path, "--seg_np_path", seg_np_path, "--full_np_path", full_np_path, "--pc_bounding_box_path", table_bounding_box_path, "--save_dir", save_dir], capture_output=True, text=True)
+        print(contact_graspnet_env_path + " " + generate_grasps_path + ' --seg_np_path ' + seg_np_path + ' --full_np_path ' + full_np_path + ' --pc_bounding_box_path ' + table_bounding_box_path + ' --save_dir ' + save_dir)
+        result = subprocess.run([contact_graspnet_env_path, generate_grasps_path, "--seg_np_path", seg_np_path, "--full_np_path", full_np_path, "--pc_bounding_box_path", table_bounding_box_path, "--save_dir", save_dir], capture_output=True, text=True)
         print("Successfully generated grasps")
     
     @staticmethod

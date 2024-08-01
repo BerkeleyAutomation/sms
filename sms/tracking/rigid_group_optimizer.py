@@ -277,7 +277,6 @@ class RigidGroupOptimizer:
         if use_hand_mask:
             loss = (frame.dino_feats - outputs["dino"])[frame.hand_mask].norm(dim=-1).mean()
         else:
-            import pdb; pdb.set_trace()
             dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
             loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)

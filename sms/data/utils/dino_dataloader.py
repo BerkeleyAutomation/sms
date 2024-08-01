@@ -243,7 +243,7 @@ class DinoDataloader(FeatureDataloader):
         # print(self.dino_load_size)
         preproc_image = extractor.preprocess(image, self.dino_load_size)[0].to(self.device)
         # print(preproc_image.shape)
-        preproc_image = preproc_image[:,:,0:1260] # HARDCODED RESOLUTION RESIZE THIS IS BAD
+        # preproc_image = preproc_image[:,:,0:1260] # HARDCODED RESOLUTION RESIZE THIS IS BAD
         # start = time.time()
         with torch.no_grad():
             descriptors = extractor.extract_descriptors(

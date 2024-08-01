@@ -1,5 +1,5 @@
 img_dir = "img"
-
+depth_dir = 'depth'
 import glob
 import os
 import numpy as np
@@ -49,7 +49,8 @@ def save_poses(poses_dir, intrinsics_dict, cam_to_wrist):
     for i in range(num_files):
         transform_mat = np.loadtxt(os.path.join(poses_dir, f"{i:03d}.txt"))
         extrinsics_dicts.append({
-            "file_path": os.path.join(img_dir, f"{i:03d}.png"),
+            "file_path": os.path.join(img_dir, f"frame_{i+1:05d}.png"),
+            "depth_file_path": os.path.join(depth_dir,f"frame_{i+1:05d}.npy"),
             "transform_matrix": transform_mat.tolist()
             })
         

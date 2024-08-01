@@ -54,7 +54,7 @@ class PatchEmbeddingDataloader(FeatureDataloader):
     def save(self):
         pass
 
-    def create(self, img_list):
+    def create(self, image_list):
         assert self.model is not None, "model must be provided to generate features"
         print("here",self.kernel_size,self.stride,self.padding)
         self.unfold_func = torch.nn.Unfold(
@@ -62,7 +62,11 @@ class PatchEmbeddingDataloader(FeatureDataloader):
             stride=self.stride,
             padding=self.padding,
         ).to(self.device)
-
+        
+        img_embeds = []
+        for img in tqdm(image_list, desc="CLIP Embedding Images", leave=False):
+            img_embeds.append(self._embed_clip_tiles(img.unsqueeze(0), self.unfold_func))
+        self.data = torch.from_numpy(np.stack(img_embeds)).half().to(self.device)
 
     def add_images(self,image_list):
         img_embeds = []
@@ -104,8 +108,7 @@ class PatchEmbeddingDataloader(FeatureDataloader):
         assert len(image.shape) == 4 and image.shape[0]==1
         # image augmentation: slow-ish (0.02s for 600x800 image per augmentation)
         aug_imgs = image.permute(0,3,1,2) #input to unfold should be N x 3 x H x W 
-        # import pdb; pdb.set_trace()
-
+        import pdb; pdb.set_trace()
         tiles = unfold_func(aug_imgs).permute(2, 0, 1).reshape(-1, 3, self.kernel_size, self.kernel_size).to(self.device)
 
         with torch.no_grad():

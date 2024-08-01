@@ -47,8 +47,7 @@ from sms.data.utils.Detic.detic.modeling.utils import reset_cls_test
 from sklearn.cluster import DBSCAN
 import matplotlib.patches as patches
 # from segment_anything import sam_model_registry, SamPredictor
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
+
 
 class DeticDataloader():
     def __init__(self):
@@ -71,6 +70,8 @@ class DeticDataloader():
         self.detic_predictor = DefaultPredictor(cfg)
 
         if self.samv2 == True:
+            from sam2.build_sam import build_sam2
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
             checkpoint = "/home/lifelong/sms/sms/data/utils/segment-anything-2/checkpoints/sam2_hiera_large.pt"
             model_cfg = "sam2_hiera_l.yaml"
             self.sam_predictor = SAM2ImagePredictor(build_sam2(model_cfg, checkpoint))
@@ -282,19 +283,19 @@ class DeticDataloader():
         ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))    
 
 
-    def visualize_output(self, im, masks, input_boxes, classes, image_save_path, mask_only=False):
-        plt.figure(figsize=(10, 10))
+    def visualize_output(self, im, masks):
+        # plt.figure(figsize=(10, 10))
         plt.imshow(im)
         for mask in masks:
             self.show_mask(mask.cpu().numpy(), plt.gca(), random_color=True)
-        if not mask_only:
-            for box, class_name in zip(input_boxes, classes):
-                self.show_box(box, plt.gca())
-                x, y = box[:2]
-                plt.gca().text(x, y - 5, class_name, color='white', fontsize=12, fontweight='bold', bbox=dict(facecolor='green', edgecolor='green', alpha=0.5))
+        # if not mask_only:
+        #     for box, class_name in zip(input_boxes, classes):
+        #         self.show_box(box, plt.gca())
+        #         x, y = box[:2]
+        #         plt.gca().text(x, y - 5, class_name, color='white', fontsize=12, fontweight='bold', bbox=dict(facecolor='green', edgecolor='green', alpha=0.5))
         plt.axis('off')
-        plt.savefig(image_save_path)
-        #plt.show()
+        plt.savefig("detic_output.png",bbox_inches='tight')
+        plt.show()
 
 
     def generate_colors(self, num_colors):

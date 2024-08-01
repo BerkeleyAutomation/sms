@@ -1,7 +1,7 @@
 from sms.tracking.visualizer import GaussianVisualizer
 from pathlib import Path
 import time
-CKPT = '/home/yujustin/Desktop/sms/sms/data/utils/Detic/outputs/20240728_panda_gripper_light_blue_jaw_4/sms-data/2024-07-28_231908/config.yml'
+CKPT = '/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_drill_battery2/sms-data/2024-07-31_032305/config.yml'
 def main(
     config_path: Path = Path(CKPT),
     ):

@@ -204,10 +204,11 @@ def set_up_dirs(scene_name):
 def save_imgs(img_l, img_r, depth, i, save_dirs, flip_table=False):
     img_l = cv2.cvtColor(img_l, cv2.COLOR_BGR2RGB)
     img_r = cv2.cvtColor(img_r, cv2.COLOR_BGR2RGB)
-    cv2.imwrite(os.path.join(save_dirs["img"], f"{i:03d}.png"), img_l)
-    cv2.imwrite(os.path.join(save_dirs["img_r"], f"{i:03d}.png"), img_r)
-    np.save(os.path.join(save_dirs["depth"], f"{i:03d}.npy"), depth)
-    plt.imsave(os.path.join(save_dirs["depth_png"], f"{i:03d}.png"), depth,cmap='jet')
+    i = i + 1
+    cv2.imwrite(os.path.join(save_dirs["img"], f"frame_{i:05d}.png"), img_l)
+    cv2.imwrite(os.path.join(save_dirs["img_r"], f"frame_{i:05d}.png"), img_r)
+    np.save(os.path.join(save_dirs["depth"], f"frame_{i:05d}.npy"), depth)
+    plt.imsave(os.path.join(save_dirs["depth_png"], f"frame_{i:05d}.png"), depth,cmap='jet')
     # if flip_table:
     #     np.save(os.path.join(save_dirs["no_table_depth"], f"{i:03d}.npy"), no_t_depth)
     #     plt.imsave(
@@ -359,13 +360,11 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     save_dirs = set_up_dirs(scene_name)
     use_robot, use_cam = True, True
     if use_robot:
-        
         robot = UR5Robot(gripper=1)
         clear_tcp(robot)
 
         home_joints = np.array([0.30870315432548523, -1.2771266142474573, -1.5955479780780237, -1.754920784627096, 1.5260951519012451, 0.2983420491218567])
         robot.move_joint(home_joints,vel=1.0,acc=0.1)
-        
         world_to_wrist = robot.get_pose()
         world_to_wrist.from_frame = "wrist"
         world_to_cam = world_to_wrist * wrist_to_cam
