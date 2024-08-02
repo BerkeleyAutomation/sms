@@ -22,7 +22,8 @@ from nerfstudio.models.splatfacto import SH2RGB
 
 from sms.tracking.rigid_group_optimizer import RigidGroupOptimizer, RigidGroupOptimizerConfig
 from sms.tracking.toad_object import ToadObject
-from sms.tracking.frame import Frame
+# from sms.tracking.frame import Frame
+from sms.tracking.observation import PosedObservation, Frame
 from sms.data.utils.dino_dataloader2 import DinoDataloader
 import os.path as osp
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
@@ -138,6 +139,7 @@ class Optimizer:
             width=width,
             height=height,
         )
+        self.cam2world_ns = deepcopy(cam2world_ns)
 
         print("Ratio: " + str(self.MATCH_RESOLUTION / min(width, height)))
         cam2world_ns.rescale_output_resolution(
@@ -145,7 +147,7 @@ class Optimizer:
         )
         
         # Set up the optimizer.
-        self.cam2world_ns = cam2world_ns
+        self.cam2world_ns_ds = cam2world_ns
         self.dataset_scale = dataset_scale
 
         self.orig_means = self.pipeline.model.gauss_params["means"].detach().clone()
@@ -251,13 +253,21 @@ class Optimizer:
         
         return cluster_labels_keep.int().cuda(), group_masks, group_masks_global
 
-    def set_frame(self, rgb, ns_camera, depth, dino = None) -> None:
+    def set_frame(self, rgb, ns_camera, depth) -> None:
+        """Set the first frame for the optimizer -- doesn't optimize the poses yet."""
+        target_frame_rgb = (rgb/255)
+        
+        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
+        
+        self.optimizer.set_frame(frame)
+        
+    def set_observation(self, rgb, ns_camera, depth) -> None:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
         
-        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth, dino = dino)
+        frame = PosedObservation(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
         
-        self.optimizer.set_frame(frame)
+        self.optimizer.set_observation(frame)
 
     def init_obj_pose(self):
         """Initialize the object pose, and render the object pose optimization process.

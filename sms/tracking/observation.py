@@ -94,12 +94,13 @@ class PosedObservation:
     """
     Class for computing relevant data products for a frame and storing them
     """
-    rasterize_resolution: int = 490
+    # rasterize_resolution: int = 490
+    max_roi_resolution: int = 490
     _frame: Frame
     _raw_rgb: torch.Tensor
     _original_camera: Cameras
     _original_depth: Optional[torch.Tensor] = None
-    _roi_frame: Optional[Frame] = None
+    _roi_frames: Optional[List[Frame]] = []
     
     def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor] = None):
         """
@@ -118,7 +119,7 @@ class PosedObservation:
             self._original_depth = metric_depth_img
         self._original_camera = deepcopy(camera.to('cuda'))
         cam = deepcopy(camera.to('cuda'))
-        cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
+        # cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
         self._frame = Frame(rgb, cam, dino_fn, metric_depth_img)
         
     @property
@@ -126,12 +127,12 @@ class PosedObservation:
         return self._frame
     
     @property
-    def roi_frame(self):
-        if self._roi_frame is None:
-            raise RuntimeError("ROI not set")
-        return self._roi_frame
+    def roi_frames(self):
+        if len(self._roi_frames) == 0:
+            raise RuntimeError("ROIs not set")
+        return self._roi_frames
     
-    def set_roi(self, xmin, xmax, ymin, ymax):
+    def add_roi(self, xmin, xmax, ymin, ymax):
         assert xmin < xmax and ymin < ymax
         assert xmin >= 0 and ymin >= 0
         assert xmax <= 1.0 and ymax <= 1.0, "xmin and ymin should be normalized"
@@ -145,5 +146,6 @@ class PosedObservation:
         ymax = ymin + ylen
         rgb = self._raw_rgb[ymin:ymax, xmin:xmax].clone()
         camera = crop_camera(self._original_camera, xmin, xmax, ymin, ymax)
-        camera.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
-        self._roi_frame = Frame(rgb, camera, self._dino_fn, self._original_depth)
+        if max(camera.width.item(),camera.height.item()) > self.max_roi_resolution:
+            camera.rescale_output_resolution(self.max_roi_resolution/max(camera.width.item(),camera.height.item()))
+        self._roi_frames.append(Frame(rgb, camera, self._dino_fn, self._original_depth))

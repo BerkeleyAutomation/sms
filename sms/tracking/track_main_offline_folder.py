@@ -120,7 +120,7 @@ def main(
     depth_numpy = np.load(initial_depth_path)
     l = torch.from_numpy(cv2.cvtColor(img_numpy,cv2.COLOR_RGB2BGR)).to(DEVICE)
     depth = torch.from_numpy(depth_numpy).to(DEVICE)
-    toad_opt.set_frame(l,toad_opt.cam2world_ns,depth)
+    toad_opt.set_frame(l,toad_opt.cam2world_ns_ds,depth)
     # with zed.raft_lock:
     toad_opt.init_obj_pose()
     print("Starting main tracking loop")
@@ -142,7 +142,7 @@ def main(
                 depth_numpy = np.load(full_depth_path)
                 left = torch.from_numpy(cv2.cvtColor(img_numpy,cv2.COLOR_RGB2BGR)).to(DEVICE)
                 depth = torch.from_numpy(depth_numpy).to(DEVICE)
-                toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
+                toad_opt.set_observation(left,toad_opt.cam2world_ns,depth)
                 print("Set frame in ", time.time()-start_time3)
                 start_time5 = time.time()
                 n_opt_iters = 25

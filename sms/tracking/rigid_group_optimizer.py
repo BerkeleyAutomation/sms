@@ -41,6 +41,7 @@ class RigidGroupOptimizerConfig:
     blur_kernel_size: int = 5
     clip_grad: float = 0.8
     use_roi = True
+    roi_inflate: float = 0.25
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -135,7 +136,7 @@ class RigidGroupOptimizer:
                 tape = wp.Tape()
                 optimizer.zero_grad()
                 with tape:
-                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, False)
+                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, False, False)
                 loss.backward()
                 tape.backward()
                 optimizer.step()
@@ -257,7 +258,7 @@ class RigidGroupOptimizer:
         return self.init_p2w[i]
     
     # @profile
-    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, do_obj_optim, full_img = True):
+    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, do_obj_optim, use_roi = True):
         """
         Returns a backpropable loss for the given frame
         """
@@ -266,8 +267,14 @@ class RigidGroupOptimizer:
             self.apply_to_model(
                 part_deltas, self.group_labels
             )
-            
-            outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
+            if use_roi is False:
+                outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
+            else:
+                for i in range(len(self.group_masks)):
+                    camera = frame.roi_frames[i].camera
+                    outputs = self.sms_model.get_outputs(camera, tracking=True)
+                import pdb; pdb.set_trace()
+                
         if "dino" not in outputs:
             self.reset_transforms()
             raise RuntimeError("Lost tracking")
@@ -283,11 +290,10 @@ class RigidGroupOptimizer:
         if use_hand_mask:
             loss = (frame.dino_feats - outputs["dino"])[frame.hand_mask].norm(dim=-1).mean()
         else:
-            if full_img:
-                loss = (frame.dino_feats - outputs["dino"]).norm(dim=-1).nanmean()
-            else:
-                dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
-                loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
+            loss = (frame.dino_feats - outputs["dino"]).norm(dim=-1).nanmean()
+            # else:
+            #     dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
+            #     loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
         if self.use_wandb:
             wandb.log({"DINO mse_loss": loss.mean().item()})
@@ -348,7 +354,7 @@ class RigidGroupOptimizer:
             # Compute loss
             with tape:
                 loss, outputs = self.get_optim_loss(self.frame, self.part_deltas, 
-                    use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim, False)
+                    use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim, True)
             if loss is not None:
                 loss.backward()
                 #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
@@ -557,11 +563,15 @@ class RigidGroupOptimizer:
         Sets the rgb_frame to optimize the pose for
         rgb_frame: HxWxC tensor image
         """
-        assert self.is_initialized, "Must initialize first with the first frame"
-        if self.config.use_roi:
-            xmin, xmax, ymin, ymax = self.calculate_roi(frame.frame.camera)
-            frame.set_roi(xmin, xmax, ymin, ymax)
+        
+        # assert self.is_initialized, "Must initialize first with the first frame"
+        
+        if self.is_initialized and self.config.use_roi:
+            for obj_id in range(len(self.group_masks)):
+                xmin, xmax, ymin, ymax = self.calculate_roi(frame.frame.camera, obj_id)
+                frame.add_roi(xmin, xmax, ymin, ymax)
         self.frame = frame
+        
         # self.add_frame(frame)
         # add another timestep of pose to the part and object poses
         # if extrapolate_velocity and self.obj_delta.shape[0] > 1:
