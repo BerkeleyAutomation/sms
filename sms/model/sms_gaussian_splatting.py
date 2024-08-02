@@ -256,9 +256,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
         else:
             self.seed_pts = None
         super().__init__(*args, **kwargs)
-        self.deprojected_new = []
-        self.colors_new = []
-        self.postBA = False
         self.loaded_ckpt = False
         self.localized_query = None
         self.best_scales = None
@@ -536,14 +533,14 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         ),
                     )
                 )
-                if self.steps_since_add >= 5500 and self.postBA and self.steps_since_add < 10000:
-                    deleted_mask = self.cull_gaussians(splits_mask)
+                
+                deleted_mask = self.cull_gaussians(splits_mask)
             elif self.step >= self.config.stop_split_at and self.config.continue_cull_post_densification:
-                if self.steps_since_add >= 5500 and self.postBA and self.steps_since_add < 10000:
-                    deleted_mask = self.cull_gaussians()
+                deleted_mask = self.cull_gaussians()
             else:
                 # if we donot allow culling post refinement, no more gaussians will be pruned.
                 deleted_mask = None
+
 
             if deleted_mask is not None:
                 self.remove_from_all_optim(optimizers, deleted_mask)
@@ -717,7 +714,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
         return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
 
-    def get_outputs(self, camera: Cameras, tracking=False) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -765,7 +762,11 @@ class smsGaussianSplattingModel(SplatfactoModel):
         viewmat = get_viewmat(optimized_camera_to_world)
         W, H = int(camera.width[0] * camera_scale_fac), int(camera.height[0] * camera_scale_fac)
         self.last_size = (H, W)
-
+        
+        # import pdb; pdb.set_trace()
+        if obj_id is not None:
+            crop_ids = torch.where(self.cluster_labels[self.keep_inds] == obj_id)[0]
+            
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]
             means_crop = self.means[crop_ids]

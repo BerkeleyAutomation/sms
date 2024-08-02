@@ -211,7 +211,7 @@ class smsdataPipeline(VanillaPipeline):
         self.add_crop_to_previous_group = ViewerButton(name="Add Crop to Previous Group", cb_hook=self._add_crop_to_previous_group, disabled=True)
         self.view_crop_group_list = ViewerButton(name="View Crop Group List", cb_hook=self._view_crop_group_list, disabled=True)
         self.crop_group_list = []
-        self.keep_inds = None
+        self.model_keep_inds = None
 
         self.move_current_crop = ViewerButton(name="Drag Current Crop", cb_hook=self._drag_current_crop, disabled=True)
         self.crop_transform_handle = None
@@ -369,7 +369,7 @@ class smsdataPipeline(VanillaPipeline):
     def _reset_crop_group_list(self, button: ViewerButton):
         """Reset the crop group list"""
         self.crop_group_list = []
-        self.keep_inds = []
+        self.model_keep_inds = []
         self.add_crop_to_group_list.set_disabled(True)
         self.view_crop_group_list.set_disabled(True)
     
@@ -398,7 +398,7 @@ class smsdataPipeline(VanillaPipeline):
         prev_state = self.state_stack[-1]
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
-        self.keep_inds = keep_inds
+        self.model_keep_inds = keep_inds
         self._export_clusters(None)
         self.z_export_options_cluster_labels.visible = True
 
@@ -650,8 +650,8 @@ class smsdataPipeline(VanillaPipeline):
         output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
         filename = Path(output_dir) / f"clusters.npy"
         
-        if self.model.cluster_labels is not None and self.keep_inds is not None:
-            np.save(filename, np.array([self.model.cluster_labels, self.keep_inds], dtype=object))
+        if self.model.cluster_labels is not None and self.model_keep_inds is not None:
+            np.save(filename, np.array([self.model.cluster_labels, self.model_keep_inds], dtype=object))
         else:
             print("No cluster labels to export")
     

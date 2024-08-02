@@ -188,6 +188,7 @@ class Optimizer:
         )
     def _cluster_from_file(self):
         self.keep_inds = self.cluster_from_file[1]
+        self.pipeline.model.keep_inds = self.cluster_from_file[1]
         self.pipeline.model.cluster_labels = self.cluster_from_file[0]
         keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
         keep_inds_mask[self.keep_inds] = 1
@@ -199,6 +200,7 @@ class Optimizer:
         prev_state = self.pipeline.state_stack[-1]
         for name in self.pipeline.model.gauss_params.keys():
             self.pipeline.model.gauss_params[name] = prev_state[name][self.keep_inds]
+        
         return cluster_labels, keep_inds_mask, cluster_labels_global
     
     def _cluster_interactively(self):
@@ -220,23 +222,27 @@ class Optimizer:
                 if getattr(self.pipeline.model, "best_scales") is None:
                     raise TypeError
                 cluster_labels, keep_inds_mask, cluster_labels_global = self._cluster_from_file()
+                print("Model populated. Clustered from cache file")
             except TypeError:
                 print("Model not populated yet. Please wait...")
                 # Wait for the user to set up the crops and groups.
                 while getattr(self.pipeline.model, "best_scales") is None:
                     time.sleep(0.1)
                 cluster_labels, keep_inds_mask, cluster_labels_global = self._cluster_from_file()
+                print("Model populated. Clustered from cache file")
         else:
             try:
                 if getattr(self.pipeline.model, "best_scales") is None:
                     raise TypeError
                 cluster_labels, keep_inds_mask, cluster_labels_global = self._cluster_interactively()
+                print("Clustered interactively")
             except TypeError:
                 print("Model not populated yet. Please wait...")
                 # Wait for the user to set up the crops and groups.
                 while getattr(self.pipeline.model, "best_scales") is None:
                     time.sleep(0.1)
                 cluster_labels, keep_inds_mask, cluster_labels_global = self._cluster_interactively()
+                print("Clustered interactively")
 
         mapping, cluster_labels_keep = torch.unique(cluster_labels, return_inverse=True)
         group_masks = [(cid == cluster_labels_keep).cuda() for cid in range(cluster_labels_keep.max().item() + 1)]

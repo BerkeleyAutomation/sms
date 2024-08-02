@@ -192,6 +192,14 @@ def main(
         ordered_scores = scores[np.argsort(scores[0])[::-1]]
         # include viser visualization of the quality of the grasps
         best_grasp = pred_grasps[np.argmax(scores)]
+        if(best_grasp[0,1] < 0):
+            rotate_180_z = np.array([[-1,0,0,0],
+                                     [0,-1,0,0],
+                                     [0,0,1,0],
+                                     [0,0,0,1]])
+            best_grasp = best_grasp @ rotate_180_z
+            import pdb
+            pdb.set_trace()
         coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         grasp_point_world.transform(best_grasp)
@@ -199,10 +207,16 @@ def main(
                                 [0,1,0,0],
                                 [0,0,1,-0.1],
                                 [0,0,0,1]])
-        
         pre_grasp_world_frame = best_grasp @ pre_grasp_tf
         pre_grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         pre_grasp_point_world.transform(pre_grasp_world_frame)
+        
+        post_grasp_tf = np.array([[1,0,0,0],
+                                [0,1,0,0],
+                                [0,0,1,-0.05],
+                                [0,0,0,1]])
+        post_grasp_world_frame = best_grasp @ post_grasp_tf
+        post_grasp_rigid_tf = RigidTransform(rotation=post_grasp_world_frame[:3,:3],translation=post_grasp_world_frame[:3,3])
         # replace with viser
         o3d.visualization.draw_geometries([full_pc,coordinate_frame,grasp_point_world,pre_grasp_point_world])
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
@@ -215,10 +229,10 @@ def main(
         time.sleep(1)
         robot.gripper.close()
         time.sleep(1)
-        robot.move_pose(pre_grasp_rigid_tf,vel=0.5,acc=0.1)
+        robot.move_pose(post_grasp_rigid_tf,vel=0.3,acc=0.1)
         time.sleep(1)
-        center_gripper_joints = np.array([-0.3208115736590784, -2.21897536913027, -2.0295470396624964, -1.0417445341693323, 2.9223015308380127, 1.2413675785064697])
-        robot.move_joint(center_gripper_joints,vel=0.5,acc=0.1)
+        # center_gripper_joints = np.array(0.016485050320625305, -1.8846338430987757, -2.4609714190112513, 0.05439639091491699, 1.6994218826293945, 4.563924312591553)
+        # robot.move_joint(center_gripper_joints,vel=0.3,acc=0.1)
         # robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
         # time.sleep(1)
         # robot.gripper.open()

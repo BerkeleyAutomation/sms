@@ -71,8 +71,8 @@ class DepthDataset(InputDataset):
         self.depth_unit_scale_factor = self.metadata["depth_unit_scale_factor"]
 
     def get_metadata(self, data: Dict) -> Dict:
-        # if self.depth_filenames is None:
-        #     return {"depth_image": self.depths[data["image_idx"]]}
+        if self.depth_filenames is None:
+            return {}
 
         filepath = self.depth_filenames[data["image_idx"]]
         height = int(self._dataparser_outputs.cameras.height[data["image_idx"]])

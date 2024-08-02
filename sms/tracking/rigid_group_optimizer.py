@@ -19,11 +19,13 @@ import trimesh
 from typing import Tuple
 from nerfstudio.model_components.losses import depth_ranking_loss
 from sms.tracking.utils2 import *
-from sms.tracking.frame import Frame
+# from sms.tracking.frame import Frame
+from sms.tracking.observation import PosedObservation, Frame
 import time
 from nerfstudio.viewer.viewer import VISER_NERFSTUDIO_SCALE_RATIO
 import wandb
 from dataclasses import dataclass
+from nerfstudio.cameras.cameras import Cameras
 
 @dataclass
 class RigidGroupOptimizerConfig:
@@ -38,6 +40,7 @@ class RigidGroupOptimizerConfig:
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
     clip_grad: float = 0.8
+    use_roi = True
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -155,11 +158,13 @@ class RigidGroupOptimizer:
         whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
         whole_pose_adj[:, 3:] = quat
         loss, final_poses = try_opt(whole_pose_adj, niter, False, render)
+        # import pdb
+        # pdb.set_trace()
         if loss is not None and loss < best_loss:
             best_loss = loss
             # best_outputs = outputs
             best_poses = final_poses
-        _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
+        # _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_poses,
@@ -252,7 +257,7 @@ class RigidGroupOptimizer:
         return self.init_p2w[i]
     
     # @profile
-    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, do_obj_optim):
+    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, do_obj_optim, full_img = True):
         """
         Returns a backpropable loss for the given frame
         """
@@ -261,6 +266,7 @@ class RigidGroupOptimizer:
             self.apply_to_model(
                 part_deltas, self.group_labels
             )
+            
             outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
         if "dino" not in outputs:
             self.reset_transforms()
@@ -277,8 +283,11 @@ class RigidGroupOptimizer:
         if use_hand_mask:
             loss = (frame.dino_feats - outputs["dino"])[frame.hand_mask].norm(dim=-1).mean()
         else:
-            dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
-            loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
+            if full_img:
+                loss = (frame.dino_feats - outputs["dino"]).norm(dim=-1).nanmean()
+            else:
+                dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
+                loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
         if self.use_wandb:
             wandb.log({"DINO mse_loss": loss.mean().item()})
@@ -288,9 +297,12 @@ class RigidGroupOptimizer:
                 valids = object_mask & (~frame.depth.isnan())
                 if use_hand_mask:
                     valids = valids & frame.hand_mask.unsqueeze(-1)
-
-                physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)[valids]
-                frame_depth_clamped = torch.clamp(frame.depth, min=-1e8, max=2.0)[valids]
+                # if full_img:
+                physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)
+                frame_depth_clamped = torch.clamp(frame.depth, min=-1e8, max=2.0)
+                # else:
+                #     physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)[valids]
+                #     frame_depth_clamped = torch.clamp(frame.depth, min=-1e8, max=2.0)[valids]
                 pix_loss = (physical_depth_clamped - frame_depth_clamped) ** 2
 
                 if self.use_wandb:
@@ -336,7 +348,7 @@ class RigidGroupOptimizer:
             # Compute loss
             with tape:
                 loss, outputs = self.get_optim_loss(self.frame, self.part_deltas, 
-                    use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim)
+                    use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim, False)
             if loss is not None:
                 loss.backward()
                 #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
@@ -517,9 +529,46 @@ class RigidGroupOptimizer:
             self.sms_model.gauss_params["means"] = self.init_means.detach().clone()
             self.sms_model.gauss_params["quats"] = self.init_quats.detach().clone()
     
+    def calculate_roi(self, cam: Cameras, obj_id: int):
+        """
+        Calculate the ROI for the object given a certain camera pose and object index
+        """
+        with torch.no_grad():
+            outputs = self.sms_model.get_outputs(cam,tracking=True,obj_id=obj_id)
+            object_mask = outputs["accumulation"] > 0.8
+            valids = torch.where(object_mask)
+            valid_xs = valids[1]/object_mask.shape[1]
+            valid_ys = valids[0]/object_mask.shape[0]#normalize to 0-1
+            inflate_amnt = (self.config.roi_inflate*(valid_xs.max() - valid_xs.min()).item(),
+                            self.config.roi_inflate*(valid_ys.max() - valid_ys.min()).item())# x, y
+            xmin, xmax, ymin, ymax = max(0,valid_xs.min().item() - inflate_amnt[0]), min(1,valid_xs.max().item() + inflate_amnt[0]),\
+                                max(0,valid_ys.min().item() - inflate_amnt[1]), min(1,valid_ys.max().item() + inflate_amnt[1])
+            return xmin, xmax, ymin, ymax
+        
     def set_frame(self, frame: Frame):
         """
         Sets the rgb_frame to optimize the pose for
         rgb_frame: HxWxC tensor image
         """
         self.frame = frame
+        
+    def set_observation(self, frame: PosedObservation, extrapolate_velocity = True):
+        """
+        Sets the rgb_frame to optimize the pose for
+        rgb_frame: HxWxC tensor image
+        """
+        assert self.is_initialized, "Must initialize first with the first frame"
+        if self.config.use_roi:
+            xmin, xmax, ymin, ymax = self.calculate_roi(frame.frame.camera)
+            frame.set_roi(xmin, xmax, ymin, ymax)
+        self.frame = frame
+        # self.add_frame(frame)
+        # add another timestep of pose to the part and object poses
+        # if extrapolate_velocity and self.obj_delta.shape[0] > 1:
+        #     with torch.no_grad():
+        #         new_parts = extrapolate_poses(self.part_deltas[-2], self.part_deltas[-1],.2)
+        #         self.part_deltas = torch.nn.Parameter(torch.cat([new_parts.unsqueeze(0)], dim=0))
+        # else:
+        #     self.part_deltas = torch.nn.Parameter(torch.cat([self.part_deltas, self.part_deltas[-1].unsqueeze(0)], dim=0))
+        # append_in_optim(self.part_optimizer, [self.part_deltas])
+        # zero_optim_state(self.part_optimizer, [-2])
