@@ -278,11 +278,12 @@ class Optimizer:
         print(f"Time taken for init (pose opt): {time.time() - start:.2f} s")
 
         start = time.time()
-        if len(renders)>1:
-            renders = [r.detach().cpu().numpy()*255 for r in renders]
-            # save video as test_camopt.mp4
-            out_clip = mpy.ImageSequenceClip(renders, fps=30)  
-            out_clip.write_videofile("test_camopt.mp4")
+        for idx, render in enumerate(renders):
+            if len(render)>1:
+                render = [r.detach().cpu().numpy()*255 for r in render]
+                # save video as test_camopt.mp4
+                out_clip = mpy.ImageSequenceClip(render, fps=30)  
+                out_clip.write_videofile(f"test_camopt{idx}.mp4")
         print(f"Time taken for init (video): {time.time() - start:.2f} s")
         
         # Assert there are no nans in part_deltas

@@ -119,7 +119,8 @@ class RigidGroupOptimizer:
             ).as_matrix()).float().cuda()
 
     def initialize_obj_pose(self, niter=100, n_seeds=6, render=False):
-        renders = []
+        renders1 = []
+        renders2 = []
         assert not self.is_initialized, "Can only initialize once"
 
         def try_opt(start_pose_adj, niter, use_depth, rndr = False, use_roi = False):
@@ -144,10 +145,12 @@ class RigidGroupOptimizer:
                     with torch.no_grad():
                         if isinstance(self.frame, PosedObservation):
                             frame = self.frame.frame
+                            outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
+                            renders2.append(outputs["rgb"].detach())
                         else:
                             frame = self.frame
-                        outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
-                    renders.append(outputs["rgb"].detach())
+                            outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
+                            renders1.append(outputs["rgb"].detach())
             self.is_initialized = True
             return loss, whole_pose_adj.data.detach()
 
@@ -183,7 +186,7 @@ class RigidGroupOptimizer:
         self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.config.pose_lr)
 
         self.prev_part_deltas = best_poses
-        return renders
+        return renders1, renders2
     
     @property
     def objreg2objinit(self):
@@ -314,7 +317,7 @@ class RigidGroupOptimizer:
                     for i in range(len(self.group_masks)):
                         feats_dict[key][i] = feats_dict[key][i].view(-1, feats_dict[key][i].shape[-1])
                     feats_dict[key] = torch.cat(feats_dict[key])
-                import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
         # if "dino" not in outputs:
         #     self.reset_transforms()
         #     raise RuntimeError("Lost tracking")

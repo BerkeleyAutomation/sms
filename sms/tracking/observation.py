@@ -24,6 +24,7 @@ class Future(Generic[T]):
         return self.result
     
 class Frame:
+    rasterize_resolution: int = 500
     camera: Cameras
     rgb: torch.Tensor
     metric_depth: bool
@@ -45,6 +46,7 @@ class Frame:
     
     def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor]):
         self.camera = deepcopy(camera.to('cuda'))
+        # self.camera.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
         self._dino_fn = dino_fn
         self.rgb = resize(
                 rgb.permute(2, 0, 1),
