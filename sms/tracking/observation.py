@@ -45,6 +45,7 @@ class Frame:
     
     def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor]):
         self.camera = deepcopy(camera.to('cuda'))
+        self._dino_fn = dino_fn
         self.rgb = resize(
                 rgb.permute(2, 0, 1),
                 (camera.height, camera.width),
@@ -56,7 +57,8 @@ class Frame:
             if metric_depth_img is not None:
                 depth = metric_depth_img
             else:
-                depth = get_depth((rgb*255).to(torch.uint8))
+                raise FileNotFoundError
+                # depth = get_depth((rgb*255).to(torch.uint8))
             depth = resize(
                             depth.unsqueeze(0),
                             (camera.height, camera.width),
@@ -94,7 +96,7 @@ class PosedObservation:
     """
     Class for computing relevant data products for a frame and storing them
     """
-    # rasterize_resolution: int = 490
+    rasterize_resolution: int = 490
     max_roi_resolution: int = 490
     _frame: Frame
     _raw_rgb: torch.Tensor
@@ -119,7 +121,7 @@ class PosedObservation:
             self._original_depth = metric_depth_img
         self._original_camera = deepcopy(camera.to('cuda'))
         cam = deepcopy(camera.to('cuda'))
-        # cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
+        cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
         self._frame = Frame(rgb, cam, dino_fn, metric_depth_img)
         
     @property
@@ -148,4 +150,5 @@ class PosedObservation:
         camera = crop_camera(self._original_camera, xmin, xmax, ymin, ymax)
         if max(camera.width.item(),camera.height.item()) > self.max_roi_resolution:
             camera.rescale_output_resolution(self.max_roi_resolution/max(camera.width.item(),camera.height.item()))
-        self._roi_frames.append(Frame(rgb, camera, self._dino_fn, self._original_depth))
+        depth = self._original_depth[ymin:ymax, xmin:xmax].clone().squeeze(-1)
+        self._roi_frames.append(Frame(rgb, camera, self._dino_fn, depth))

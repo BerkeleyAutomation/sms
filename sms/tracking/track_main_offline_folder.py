@@ -156,7 +156,7 @@ def main(
                     left.cpu().detach().numpy(),
                     render_width=left.shape[1]/2500,
                     render_height=left.shape[0]/2500,
-                    position = (0.5, 0.5, 0.5),
+                    position = (0.5, -0.5, 0.5),
                     wxyz=(0, -0.7071068, -0.7071068, 0),
                     visible=True
                 )
@@ -168,7 +168,7 @@ def main(
                     outputs["rgb"].cpu().detach().numpy(),
                     render_width=left.shape[1]/2500,
                     render_height=left.shape[0]/2500,
-                    position = (0.5, -0.5, 0.5),
+                    position = (0.5, 0.5, 0.5),
                     wxyz=(0, -0.7071068, -0.7071068, 0),
                     visible=True
                 )

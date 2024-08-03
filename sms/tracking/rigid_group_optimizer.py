@@ -34,8 +34,8 @@ class RigidGroupOptimizerConfig:
     rank_loss_erode: int = 5
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
-    pose_lr: float = 0.003
-    pose_lr_final: float = 0.0005
+    pose_lr: float = 0.005
+    pose_lr_final: float = 0.001
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
@@ -122,7 +122,7 @@ class RigidGroupOptimizer:
         renders = []
         assert not self.is_initialized, "Can only initialize once"
 
-        def try_opt(start_pose_adj, niter, use_depth, rndr = False):
+        def try_opt(start_pose_adj, niter, use_depth, rndr = False, use_roi = False):
             "tries to optimize for the initial pose, returns loss and pose + GS render if requested"
             self.reset_transforms()
             whole_pose_adj = start_pose_adj.detach().clone()
@@ -136,13 +136,17 @@ class RigidGroupOptimizer:
                 tape = wp.Tape()
                 optimizer.zero_grad()
                 with tape:
-                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, False, False)
+                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, use_roi=use_roi)
                 loss.backward()
                 tape.backward()
                 optimizer.step()
                 if rndr:
                     with torch.no_grad():
-                        outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
+                        if isinstance(self.frame, PosedObservation):
+                            frame = self.frame.frame
+                        else:
+                            frame = self.frame
+                        outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
                     renders.append(outputs["rgb"].detach())
             self.is_initialized = True
             return loss, whole_pose_adj.data.detach()
@@ -165,7 +169,9 @@ class RigidGroupOptimizer:
             best_loss = loss
             # best_outputs = outputs
             best_poses = final_poses
-        # _, best_poses = try_opt(best_poses, 85, True, True)# do a few optimization steps with depth
+            
+            self.set_observation(PosedObservation(rgb=self.frame.rgb, camera=self.frame.camera, dino_fn=self.frame._dino_fn, metric_depth_img=self.frame.depth))
+        _, best_poses = try_opt(best_poses, 85, use_depth=True, rndr=render, use_roi=True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_poses,
@@ -258,39 +264,71 @@ class RigidGroupOptimizer:
         return self.init_p2w[i]
     
     # @profile
-    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, do_obj_optim, use_roi = True):
+    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, use_roi = False):
         """
         Returns a backpropable loss for the given frame
         """
+        feats_dict = {
+            "real_rgb": [],
+            "real_dino": [],
+            "real_depth": [],
+            "rendered_rgb": [],
+            "rendered_dino": [],
+            "rendered_depth": [],
+            "object_mask": [],
+                }
         with self.render_lock:
             self.sms_model.eval()
             self.apply_to_model(
                 part_deltas, self.group_labels
             )
-            if use_roi is False:
+            if not use_roi:
                 outputs = self.sms_model.get_outputs(frame.camera, tracking=True)
+                feats_dict["real_rgb"] = frame.rgb
+                feats_dict["real_dino"] = frame.dino_feats
+                feats_dict["real_depth"] = frame.depth
+                feats_dict["rendered_rgb"] = outputs['rgb']
+                feats_dict["rendered_dino"] = outputs['dino']
+                feats_dict["rendered_depth"] = outputs['depth']
+                with torch.no_grad():
+                    feats_dict["object_mask"] = outputs["accumulation"] > 0.8
+                if not feats_dict["object_mask"].any():
+                    return None
             else:
-                for i in range(len(self.group_masks)):
+                # outputs = self.sms_model.get_outputs(frame.frame.camera, tracking=True)
+                # feats_dict["rendered_depth"] = outputs["depth"]
+                # feats_dict["real_depth"] = frame.frame.depth
+                # feats_dict["object_mask"] = outputs["accumulation"] > 0.8
+                for i in reversed(range(len(self.group_masks))):
                     camera = frame.roi_frames[i].camera
                     outputs = self.sms_model.get_outputs(camera, tracking=True)
+                    feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
+                    feats_dict["real_dino"].append(frame.roi_frames[i].dino_feats)
+                    feats_dict["real_depth"].append(frame.roi_frames[i].depth)
+                    feats_dict["rendered_rgb"].append(outputs['rgb'])
+                    feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
+                    feats_dict["rendered_depth"].append(outputs['depth'])
+                    feats_dict["object_mask"].append(outputs['accumulation']>0.8)
+                for key in feats_dict.keys():
+                    # if key not in ["rendered_depth", "real_depth", "object_mask"]:
+                    for i in range(len(self.group_masks)):
+                        feats_dict[key][i] = feats_dict[key][i].view(-1, feats_dict[key][i].shape[-1])
+                    feats_dict[key] = torch.cat(feats_dict[key])
                 import pdb; pdb.set_trace()
-                
-        if "dino" not in outputs:
-            self.reset_transforms()
-            raise RuntimeError("Lost tracking")
-        with torch.no_grad():
-            object_mask = outputs["accumulation"] > 0.8
-        if not object_mask.any():
-            return None
+        # if "dino" not in outputs:
+        #     self.reset_transforms()
+        #     raise RuntimeError("Lost tracking")
+
         # dino_feats = (
         #     self.blur(outputs["dino"].permute(2, 0, 1)[None])
         #     .squeeze()
         #     .permute(1, 2, 0)
         # )
-        if use_hand_mask:
-            loss = (frame.dino_feats - outputs["dino"])[frame.hand_mask].norm(dim=-1).mean()
-        else:
-            loss = (frame.dino_feats - outputs["dino"]).norm(dim=-1).nanmean()
+        # if use_hand_mask:
+        #     loss = (frame.dino_feats - outputs["dino"])[frame.hand_mask].norm(dim=-1).mean()
+        # else:
+        loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
+        
             # else:
             #     dino_mask = outputs["dino"].sum(dim=-1) > 1e-3
             #     loss = (frame.dino_feats[dino_mask] - outputs["dino"][dino_mask]).norm(dim=-1).nanmean()
@@ -298,25 +336,27 @@ class RigidGroupOptimizer:
         if self.use_wandb:
             wandb.log({"DINO mse_loss": loss.mean().item()})
         if use_depth:
-            if frame.metric_depth:
-                physical_depth = outputs["depth"] / self.dataset_scale
-                valids = object_mask & (~frame.depth.isnan())
-                if use_hand_mask:
-                    valids = valids & frame.hand_mask.unsqueeze(-1)
-                # if full_img:
-                physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)
-                frame_depth_clamped = torch.clamp(frame.depth, min=-1e8, max=2.0)
-                # else:
-                #     physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)[valids]
-                #     frame_depth_clamped = torch.clamp(frame.depth, min=-1e8, max=2.0)[valids]
-                pix_loss = (physical_depth_clamped - frame_depth_clamped) ** 2
-
-                if self.use_wandb:
-                    wandb.log({"depth_loss": pix_loss.mean().item()})
-                if not torch.isnan(pix_loss.mean()).any():
-                    loss = loss + pix_loss.mean()
+            physical_depth = feats_dict["rendered_depth"] / self.dataset_scale
+            valids = feats_dict["object_mask"] & (~feats_dict["real_depth"].isnan())
+            if use_hand_mask:
+                valids = valids & frame.hand_mask.unsqueeze(-1)
+            # if full_img:
+            physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)
+            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=-1e8, max=2.0)
+            # else:
+            # physical_depth_clamped = torch.clamp(physical_depth, min=-1e8, max=2.0)[valids]
+            # real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=-1e8, max=2.0)[valids]
+            pix_loss = (physical_depth_clamped - real_depth_clamped) ** 2
+            pix_loss = pix_loss[
+                    valids & (pix_loss < self.config.depth_ignore_threshold**2)
+                ]
+            # import pdb; pdb.set_trace()
+            if self.use_wandb:
+                wandb.log({"depth_loss": pix_loss.mean().item()})
+            if not torch.isnan(pix_loss.mean()).any():
+                loss = loss + pix_loss.mean()
         if use_rgb:
-            rgb_loss = 0.05 * (outputs["rgb"] - frame.rgb).abs().mean()
+            rgb_loss = 0.05 * (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
             loss = loss + rgb_loss
             if self.use_wandb:
                 wandb.log({"rgb_loss": rgb_loss.item()})
@@ -326,13 +366,7 @@ class RigidGroupOptimizer:
             if self.use_wandb:
                 wandb.log({"atap_loss": atap_loss.item()})
             loss = loss + atap_loss
-        if do_obj_optim:
-            # add regularizer on the poses to not move much
-            reg = 0.02 * self.part_deltas[:,:3].norm(dim=-1).mean() + .01 * 2 * torch.acos(0.99*self.part_deltas[:,3]).mean()
-            loss = loss + reg
-            if self.use_wandb:
-                wandb.log({"reg_loss": reg.item()})
-                
+
         return loss, outputs
         
     # @profile
@@ -347,19 +381,24 @@ class RigidGroupOptimizer:
             # renormalize rotation representation
             with torch.no_grad():
                 self.part_deltas[:, 3:] = self.part_deltas[:, 3:] / self.part_deltas[:, 3:].norm(dim=1, keepdim=True)
-                self.prev_part_deltas = self.part_deltas.detach().clone()
+                # self.prev_part_deltas = self.part_deltas.detach().clone()
             tape = wp.Tape()
             self.part_optimizer.zero_grad()
 
             # Compute loss
             with tape:
-                loss, outputs = self.get_optim_loss(self.frame, self.part_deltas, 
-                    use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.do_obj_optim, True)
+                if self.config.use_roi:
+                    # loss = 0
+                    # for obj_id in range(len(self.group_masks)):
+                    #     use_depth = (obj_id==len(self.group_masks)-1)
+                    loss, outputs = self.get_optim_loss(self.frame, self.part_deltas, 
+                            use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, True)
+                # import pdb; pdb.set_trace()
             if loss is not None:
                 loss.backward()
                 #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
                 tape.backward()
-            torch.nn.utils.clip_grad_norm_(self.part_deltas, self.config.clip_grad)
+            # torch.nn.utils.clip_grad_norm_(self.part_deltas, self.config.clip_grad)
             self.part_optimizer.step()
             part_scheduler.step()
             part_grad_norms = self.part_deltas.grad.norm(dim=1)
@@ -376,8 +415,8 @@ class RigidGroupOptimizer:
                 self.apply_to_model(
                         self.part_deltas, self.group_labels
                     )
-
-        #         full_outputs = self.sms_model.get_outputs(self.frame.camera, tracking=True)
+                # if self.config.use_roi:
+                #     outputs = self.sms_model.get_outputs(self.frame.frame.camera, tracking=True)
         return {k:i.detach() for k,i in outputs.items()}
 
     def apply_to_model(self, part_deltas, group_labels):
