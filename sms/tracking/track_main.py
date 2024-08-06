@@ -104,7 +104,7 @@ def main(
 
     l, _, depth = zed.get_frame(depth=True)  # Grab a frame from the camera.
     
-    toad_opt = Optimizer( # Initialize the optimizer
+    opt = Optimizer( # Initialize the optimizer
         config_path,
         zed.get_K(),
         l.shape[1],
@@ -118,12 +118,12 @@ def main(
 
     @opt_init_handle.on_click # Btn callback -- initializes tracking optimization
     def _(_):
-        assert (zed is not None) and (toad_opt is not None)
+        assert (zed is not None) and (opt is not None)
         opt_init_handle.disabled = True
         l, _, depth = zed.get_frame(depth=True)
-        toad_opt.set_frame(l,toad_opt.cam2world_ns,depth)
+        opt.set_frame(l,opt.cam2world_ns,depth)
         with zed.raft_lock:
-            toad_opt.init_obj_pose()
+            opt.init_obj_pose()
         # then have the zed_optimizer be allowed to run the optimizer steps.
     opt_init_handle.disabled = False
     text_handle.disabled = False
@@ -136,15 +136,15 @@ def main(
         
         clip_encoder.set_positives(text_positives.split(";"))
         if len(clip_encoder.positives) > 0:
-            relevancy = toad_opt.get_clip_relevancy(clip_encoder)
-            group_masks = toad_opt.optimizer.group_masks
+            relevancy = opt.get_clip_relevancy(clip_encoder)
+            group_masks = opt.optimizer.group_masks
 
             relevancy_avg = []
             for mask in group_masks:
                 relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
             relevancy_avg = torch.tensor(relevancy_avg)
-            toad_opt.max_relevancy_label = torch.argmax(relevancy_avg).item()
-            toad_opt.max_relevancy_text = text_positives
+            opt.max_relevancy_label = torch.argmax(relevancy_avg).item()
+            opt.max_relevancy_text = text_positives
             generate_grasps_handle.disabled = False
             execute_grasp_handle.disabled = False
         else:
@@ -153,22 +153,22 @@ def main(
     @generate_grasps_handle.on_click
     def _(_):
         # generate_grasps_handle.disabled = True
-        toad_opt.state_to_ply(toad_opt.max_relevancy_label)
-        local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
-        global_ply_filename = str(toad_opt.config_path.parent.joinpath("global.ply"))
-        table_bounding_cube_filename = str(toad_opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
-        save_dir = str(toad_opt.config_path.parent)
+        opt.state_to_ply(opt.max_relevancy_label)
+        local_ply_filename = str(opt.config_path.parent.joinpath("local.ply"))
+        global_ply_filename = str(opt.config_path.parent.joinpath("global.ply"))
+        table_bounding_cube_filename = str(opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
+        save_dir = str(opt.config_path.parent)
         ToadObject.generate_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, save_dir)
         # generate_grasps_handle.disabled = False
         execute_grasp_handle.disabled = False
         
     @execute_grasp_handle.on_click
     def _(_):
-        local_ply_filename = str(toad_opt.config_path.parent.joinpath("local.ply"))
-        global_ply_filename = str(toad_opt.config_path.parent.joinpath("global.ply"))
-        table_bounding_cube_filename = str(toad_opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
-        pred_grasps_filename = str(toad_opt.config_path.parent.joinpath("pred_grasps_world.npy"))
-        scores_filename = str(toad_opt.config_path.parent.joinpath("scores.npy"))
+        local_ply_filename = str(opt.config_path.parent.joinpath("local.ply"))
+        global_ply_filename = str(opt.config_path.parent.joinpath("global.ply"))
+        table_bounding_cube_filename = str(opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
+        pred_grasps_filename = str(opt.config_path.parent.joinpath("pred_grasps_world.npy"))
+        scores_filename = str(opt.config_path.parent.joinpath("scores.npy"))
         seg_pc = o3d.io.read_point_cloud(local_ply_filename)
         full_pc_unfiltered = o3d.io.read_point_cloud(global_ply_filename)
 
@@ -244,7 +244,7 @@ def main(
     # rendered_dino_frames = []
     part_deltas = []
     save_videos = True
-    obj_label_list = [None for _ in range(toad_opt.num_groups)]
+    obj_label_list = [None for _ in range(opt.num_groups)]
     
     
     print("Starting main tracking loop")
@@ -255,15 +255,16 @@ def main(
                 left, right, depth = zed.get_frame()
                 # print("Got frame in ", time.time()-start_time)
                 # start_time2 = time.time()
-                assert isinstance(toad_opt, Optimizer)
-                if toad_opt.initialized:
+                assert isinstance(opt, Optimizer)
+                if opt.initialized:
                     start_time3 = time.time()
-                    toad_opt.set_frame(left,toad_opt.cam2world_ns,depth)
+                    # opt.set_frame(left,opt.cam2world_ns,depth)
+                    opt.set_observation(left,opt.cam2world_ns,depth)
                     print("Set frame in ", time.time()-start_time3)
                     start_time5 = time.time()
                     n_opt_iters = 20
                     with zed.raft_lock:
-                        outputs = toad_opt.step_opt(niter=n_opt_iters)
+                        outputs = opt.step_opt(niter=n_opt_iters)
                     print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
                     # Add ZED img and GS render to viser
@@ -291,7 +292,7 @@ def main(
                     if save_videos:
                         rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
                     
-                    tf_list = toad_opt.get_parts2world()
+                    tf_list = opt.get_parts2world()
                     part_deltas.append(tf_list)
                     for idx, tf in enumerate(tf_list):
                         server.add_frame(
@@ -302,15 +303,15 @@ def main(
                             axes_length=0.05,
                             axes_radius=.001
                         )
-                        mesh = toad_opt.toad_object.meshes[idx]
+                        mesh = opt.toad_object.meshes[idx]
                         server.add_mesh_trimesh(
                             f"object/group_{idx}/mesh",
                             mesh=mesh,
                         )
-                        if idx == toad_opt.max_relevancy_label:
+                        if idx == opt.max_relevancy_label:
                             obj_label_list[idx] = server.add_label(
                             f"object/group_{idx}/label",
-                            text=toad_opt.max_relevancy_text,
+                            text=opt.max_relevancy_text,
                             position = (0,0,0.05),
                             )
                         else:

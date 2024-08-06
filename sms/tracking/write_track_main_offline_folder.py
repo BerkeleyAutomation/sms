@@ -5,11 +5,12 @@ import datetime
 import os
 import cv2
 import numpy as np
+
 def create_folder_if_not_exists(folder_path):
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
         
-folder_name = '/home/lifelong/sms/sms/data/utils/Detic/outputs/20240728_panda_gripper_light_blue_jaw_4/offline_video'
+folder_name = '/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_drill_battery2/sms-data/2024-07-31_032305/offline_video'
 image_folder_name = folder_name + '/img'
 depth_folder_name = folder_name + '/depth'
 create_folder_if_not_exists(folder_name)
@@ -26,8 +27,8 @@ while True:
     time_taken = end_time - start_time
     print("Frequency: " + str(float(1./time_taken)))
     timestamp = datetime.datetime.now().timestamp()
-    import pdb
-    pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
     cv2.imwrite(image_folder_name+'/img_'+str(i).zfill(10)+'.png',cv2.cvtColor(l.detach().cpu().numpy(),cv2.COLOR_BGR2RGB))
     np.save(depth_folder_name+'/depth_'+str(i).zfill(10)+'.npy',depth.detach().cpu().numpy())
     i += 1    

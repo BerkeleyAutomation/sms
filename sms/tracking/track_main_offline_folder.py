@@ -126,111 +126,113 @@ def main(
     print("Starting main tracking loop")
     import pdb
     pdb.set_trace()
-    try:
-        # if zed is not None:
-        start_time = time.time()
-        start_time2 = time.time()
-        assert isinstance(toad_opt, Optimizer)
-        while not toad_opt.initialized:
-            time.sleep(0.1)
-        if toad_opt.initialized:
+    # try:
+    # if zed is not None:
+    start_time = time.time()
+    start_time2 = time.time()
+    assert isinstance(toad_opt, Optimizer)
+    while not toad_opt.initialized:
+        time.sleep(0.1)
+    if toad_opt.initialized:
+        # start_time3 = time.time()
+        for(img_path,depth_path) in zip(image_paths,depth_paths):
+            full_image_path = os.path.join(image_folder,img_path)
+            full_depth_path = os.path.join(depth_folder,depth_path)
+            img_numpy = cv2.imread(full_image_path)
+            depth_numpy = np.load(full_depth_path)
+            left = torch.from_numpy(cv2.cvtColor(img_numpy,cv2.COLOR_RGB2BGR)).to(DEVICE)
+            depth = torch.from_numpy(depth_numpy).to(DEVICE)
+            # import pdb; pdb.set_trace
             start_time3 = time.time()
-            for(img_path,depth_path) in zip(image_paths,depth_paths):
-                full_image_path = os.path.join(image_folder,img_path)
-                full_depth_path = os.path.join(depth_folder,depth_path)
-                img_numpy = cv2.imread(full_image_path)
-                depth_numpy = np.load(full_depth_path)
-                left = torch.from_numpy(cv2.cvtColor(img_numpy,cv2.COLOR_RGB2BGR)).to(DEVICE)
-                depth = torch.from_numpy(depth_numpy).to(DEVICE)
-                toad_opt.set_observation(left,toad_opt.cam2world_ns,depth)
-                print("Set frame in ", time.time()-start_time3)
-                start_time5 = time.time()
-                n_opt_iters = 25
-                # with zed.raft_lock:
-                outputs = toad_opt.step_opt(niter=n_opt_iters)
-                print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
+            toad_opt.set_observation(left,toad_opt.cam2world_ns,depth)
+            print("Set observation in ", time.time()-start_time3)
+            start_time5 = time.time()
+            n_opt_iters = 15
+            # with zed.raft_lock:
+            outputs = toad_opt.step_opt(niter=n_opt_iters)
+            print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
-                # Add ZED img and GS render to viser
-                server.add_image(
-                    "cam/zed_left",
-                    left.cpu().detach().numpy(),
-                    render_width=left.shape[1]/2500,
-                    render_height=left.shape[0]/2500,
-                    position = (0.5, -0.5, 0.5),
-                    wxyz=(0, -0.7071068, -0.7071068, 0),
-                    visible=True
+            # Add ZED img and GS render to viser
+            server.add_image(
+                "cam/zed_left",
+                left.cpu().detach().numpy(),
+                render_width=left.shape[1]/2500,
+                render_height=left.shape[0]/2500,
+                position = (0.5, -0.5, 0.5),
+                wxyz=(0, -0.7071068, -0.7071068, 0),
+                visible=True
+            )
+            if save_videos:
+                real_frames.append(left.cpu().detach().numpy())
+            
+            server.add_image(
+                "cam/gs_render",
+                outputs["rgb"].cpu().detach().numpy(),
+                render_width=left.shape[1]/2500,
+                render_height=left.shape[0]/2500,
+                position = (0.5, 0.5, 0.5),
+                wxyz=(0, -0.7071068, -0.7071068, 0),
+                visible=True
+            )
+            if save_videos:
+                rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+            
+            tf_list = toad_opt.get_parts2world()
+            part_deltas.append(tf_list)
+            for idx, tf in enumerate(tf_list):
+                server.add_frame(
+                    f"object/group_{idx}",
+                    position=tf.translation(),
+                    wxyz=tf.rotation().wxyz,
+                    show_axes=True,
+                    axes_length=0.05,
+                    axes_radius=.001
                 )
-                if save_videos:
-                    real_frames.append(left.cpu().detach().numpy())
-                
-                server.add_image(
-                    "cam/gs_render",
-                    outputs["rgb"].cpu().detach().numpy(),
-                    render_width=left.shape[1]/2500,
-                    render_height=left.shape[0]/2500,
-                    position = (0.5, 0.5, 0.5),
-                    wxyz=(0, -0.7071068, -0.7071068, 0),
-                    visible=True
+                mesh = toad_opt.toad_object.meshes[idx]
+                server.add_mesh_trimesh(
+                    f"object/group_{idx}/mesh",
+                    mesh=mesh,
                 )
-                if save_videos:
-                    rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
-                
-                tf_list = toad_opt.get_parts2world()
-                part_deltas.append(tf_list)
-                for idx, tf in enumerate(tf_list):
-                    server.add_frame(
-                        f"object/group_{idx}",
-                        position=tf.translation(),
-                        wxyz=tf.rotation().wxyz,
-                        show_axes=True,
-                        axes_length=0.05,
-                        axes_radius=.001
+                if idx == toad_opt.max_relevancy_label:
+                    obj_label_list[idx] = server.add_label(
+                    f"object/group_{idx}/label",
+                    text=toad_opt.max_relevancy_text,
+                    position = (0,0,0.05),
                     )
-                    mesh = toad_opt.toad_object.meshes[idx]
-                    server.add_mesh_trimesh(
-                        f"object/group_{idx}/mesh",
-                        mesh=mesh,
-                    )
-                    if idx == toad_opt.max_relevancy_label:
-                        obj_label_list[idx] = server.add_label(
-                        f"object/group_{idx}/label",
-                        text=toad_opt.max_relevancy_text,
-                        position = (0,0,0.05),
-                        )
-                    else:
-                        if obj_label_list[idx] is not None:
-                            obj_label_list[idx].remove()
+                else:
+                    if obj_label_list[idx] is not None:
+                        obj_label_list[idx].remove()
 
-                # Visualize pointcloud.
-                start_time4 = time.time()
-                K = torch.from_numpy(zedK).float().cuda()
-                assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
-                points, colors = Zed.project_depth(left, depth, K, depth_threshold=1.0, subsample=6)
-                server.add_point_cloud(
-                    "camera/points",
-                    points=points,
-                    colors=colors,
-                    point_size=0.001,
-                )
+            # Visualize pointcloud.
+            start_time4 = time.time()
+            K = torch.from_numpy(zedK).float().cuda()
+            assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
+            points, colors = Zed.project_depth(left, depth, K, depth_threshold=1.0, subsample=6)
+            server.add_point_cloud(
+                "camera/points",
+                points=points,
+                colors=colors,
+                point_size=0.001,
+            )
             # print("Visualized pointcloud in ", time.time()-start_time4)
             # print("Opt in ", time.time()-start_time2)
 
         # else:
         #     time.sleep(1)
             
-    except KeyboardInterrupt:
-        # Generate videos from the frames if the user interrupts the loop with ctrl+c
-        frames_dict = {"real_frames": real_frames, 
-                        "rendered_rgb": rendered_rgb_frames}
-        timestr = generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
+    # except KeyboardInterrupt:
+    #     # Generate videos from the frames if the user interrupts the loop with ctrl+c
+    #     frames_dict = {"real_frames": real_frames, 
+    #                     "rendered_rgb": rendered_rgb_frames}
+    #     timestr = generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
         
-        # Save part deltas to npy file
-        path = config_path.parent.joinpath(f"{timestr}")
-        np.save(path.joinpath("part_deltas_traj.npy"), np.array(part_deltas))
-        exit()
-    except Exception as e:
-        print("An exception occured: ", e)
-        exit()
+    #     # Save part deltas to npy file
+    #     path = config_path.parent.joinpath(f"{timestr}")
+    #     np.save(path.joinpath("part_deltas_traj.npy"), np.array(part_deltas))
+    #     exit()
+    # except Exception as e:
+    #     print("An exception occured: ", e)
+    #     exit()
 
 
 if __name__ == "__main__":

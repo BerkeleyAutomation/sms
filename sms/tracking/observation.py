@@ -44,9 +44,11 @@ class Frame:
     def hand_mask(self):
         return self._hand_mask.retrieve()
     
-    def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor]):
+    def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor], 
+                 xmin: Optional[float] = None, xmax: Optional[float] = None, ymin: Optional[float] = None, ymax: Optional[float] = None):
+        # self.orig_camera = deepcopy(camera.to('cuda'))
         self.camera = deepcopy(camera.to('cuda'))
-        # self.camera.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
+        # self.camera.rescale_output_resolution(self.rasterize_resolution/min(camera.width.item(),camera.height.item()))
         self._dino_fn = dino_fn
         self.rgb = resize(
                 rgb.permute(2, 0, 1),
@@ -92,19 +94,21 @@ class Frame:
             return hand_mask
         self._hand_mask = Future(_get_hand_mask)
         
+        self.xmin, self.xmax, self.ymin, self.ymax = xmin, xmax, ymin, ymax
+        
 
     
 class PosedObservation:
     """
     Class for computing relevant data products for a frame and storing them
     """
-    rasterize_resolution: int = 490
+    # rasterize_resolution: int = 490
     max_roi_resolution: int = 490
     _frame: Frame
     _raw_rgb: torch.Tensor
     _original_camera: Cameras
     _original_depth: Optional[torch.Tensor] = None
-    _roi_frames: Optional[List[Frame]] = []
+    _roi_frames: Optional[List[Frame]] = None
     
     def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor] = None):
         """
@@ -123,8 +127,9 @@ class PosedObservation:
             self._original_depth = metric_depth_img
         self._original_camera = deepcopy(camera.to('cuda'))
         cam = deepcopy(camera.to('cuda'))
-        cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
+        # cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
         self._frame = Frame(rgb, cam, dino_fn, metric_depth_img)
+        self._roi_frames = []
         
     @property
     def frame(self):
@@ -153,4 +158,4 @@ class PosedObservation:
         if max(camera.width.item(),camera.height.item()) > self.max_roi_resolution:
             camera.rescale_output_resolution(self.max_roi_resolution/max(camera.width.item(),camera.height.item()))
         depth = self._original_depth[ymin:ymax, xmin:xmax].clone().squeeze(-1)
-        self._roi_frames.append(Frame(rgb, camera, self._dino_fn, depth))
+        self._roi_frames.append(Frame(rgb, camera, self._dino_fn, depth, xmin, xmax, ymin, ymax))

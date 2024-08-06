@@ -714,7 +714,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
         return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
 
-    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None, BLOCK_WIDTH=16) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -810,7 +810,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             else:
                 opacities_crop = self.temp_opacities
 
-        BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
+        # BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
         K = camera.get_intrinsics_matrices().cuda()
         K[:, :2, :] *= camera_scale_fac
         # apply the compensation of screen space blurring to gaussians

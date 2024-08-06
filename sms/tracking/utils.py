@@ -1,57 +1,61 @@
 import warp as wp
 import torch
 from nerfstudio.cameras.cameras import Cameras
-from viser.transforms import SE3,SO3
+from sms.tracking.transforms import SE3, SO3
 
 def extrapolate_poses(p1_7v, p2_7v,lam):
-    r1 = SO3(p1_7v[...,3:])
-    t1 = SE3.from_rotation_and_translation(r1, p1_7v[...,:3])
-    r2 = SO3(p2_7v[...,3:])
-    t2 = SE3.from_rotation_and_translation(r2, p2_7v[...,:3])
-    t_2_1 = t1.inverse() @ t2
-    delta_pos = t_2_1.translation()*lam
-    delta_rot = SO3.exp((t_2_1.rotation().log()*lam))
-    new_t = (t2 @ SE3.from_rotation_and_translation(delta_rot, delta_pos))
-    return new_t.wxyz_xyz.roll(3,dims=-1)
+    ext_7v = []
+    for i in range(len(p2_7v)):
+        r1 = SO3(p1_7v[i,3:])
+        t1 = SE3.from_rotation_and_translation(r1, p1_7v[i,:3])
+        r2 = SO3(p2_7v[i,3:])
+        t2 = SE3.from_rotation_and_translation(r2, p2_7v[i,:3])
+        t_2_1 = t1.inverse() @ t2
+        delta_pos = t_2_1.translation()*lam
+        delta_rot = SO3.exp((t_2_1.rotation().log()*lam))
+        new_t = (t2 @ SE3.from_rotation_and_translation(delta_rot, delta_pos))
+        ext_7v.append(new_t.wxyz_xyz.roll(3,dims=-1))
+    return torch.stack(ext_7v)
 
-def zero_optim_state(optimizer:torch.optim.Adam, timestamps):
+def zero_optim_state(optimizer:torch.optim.Adam):
+    # import pdb; pdb.set_trace()
     param = optimizer.param_groups[0]["params"][0]
     param_state = optimizer.state[param]
     if "max_exp_avg_sq" in param_state:
         # for amsgrad
-        param_state["max_exp_avg_sq"][timestamps] = 0.0
+        param_state["max_exp_avg_sq"] = torch.zeros(param_state["max_exp_avg_sq"].shape, device=param_state["max_exp_avg_sq"].device)
     if "exp_avg" in param_state:
-        param_state["exp_avg"][timestamps] = 0.0
-        param_state["exp_avg_sq"][timestamps] = 0.0
+        param_state["exp_avg"] = torch.zeros(param_state["exp_avg"].shape, device=param_state["exp_avg"].device)
+        param_state["exp_avg_sq"] = torch.zeros(param_state["exp_avg_sq"].shape, device=param_state["exp_avg_sq"].device)
 
-def append_in_optim(optimizer:torch.optim.Adam, new_params):
-    """adds the parameters to the optimizer"""
+def replace_in_optim(optimizer:torch.optim.Adam, new_params):
+    """replaces the parameters in the optimizer"""
     param = optimizer.param_groups[0]["params"][0]
     param_state = optimizer.state[param]
-    if "max_exp_avg_sq" in param_state:
-        # for amsgrad
-        param_state["max_exp_avg_sq"] = torch.cat(
-            [
-                param_state["max_exp_avg_sq"],
-                param_state["max_exp_avg_sq"][-1].unsqueeze(0)
-            ],
-            dim=0,
-        )
-    if "exp_avg" in param_state:
-        param_state["exp_avg"] = torch.cat(
-            [
-                param_state["exp_avg"],
-                param_state["exp_avg"][-1].unsqueeze(0)
-            ],
-            dim=0,
-        )
-        param_state["exp_avg_sq"] = torch.cat(
-            [
-                param_state["exp_avg_sq"],
-                param_state["exp_avg_sq"][-1].unsqueeze(0)
-            ],
-            dim=0,
-        )
+    # if "max_exp_avg_sq" in param_state:
+    #     # for amsgrad
+    #     param_state["max_exp_avg_sq"] = torch.cat(
+    #         [
+    #             param_state["max_exp_avg_sq"],
+    #             param_state["max_exp_avg_sq"][-1].unsqueeze(0)
+    #         ],
+    #         dim=0,
+    #     )
+    # if "exp_avg" in param_state:
+    #     param_state["exp_avg"] = torch.cat(
+    #         [
+    #             param_state["exp_avg"],
+    #             param_state["exp_avg"][-1].unsqueeze(0)
+    #         ],
+    #         dim=0,
+    #     )
+    #     param_state["exp_avg_sq"] = torch.cat(
+    #         [
+    #             param_state["exp_avg_sq"],
+    #             param_state["exp_avg_sq"][-1].unsqueeze(0)
+    #         ],
+    #         dim=0,
+    #     )
 
     del optimizer.state[param]
     optimizer.state[new_params[0]] = param_state
