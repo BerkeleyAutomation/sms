@@ -35,14 +35,15 @@ class RigidGroupOptimizerConfig:
     rank_loss_erode: int = 5
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
-    pose_lr: float = 0.006
-    pose_lr_final: float = 0.0003
+    pose_lr: float = 0.003
+    pose_lr_final: float = 0.0005
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
     clip_grad: float = 0.8
     use_roi = True
-    roi_inflate: float = 0.35
+    roi_inflate_proportion: float = 0.25
+    roi_inflate: float = 100
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -166,8 +167,8 @@ class RigidGroupOptimizer:
             # best_outputs = outputs
             best_poses = final_poses
             
-        #     self.set_observation(PosedObservation(rgb=self.frame.rgb, camera=self.frame.camera, dino_fn=self.frame._dino_fn, metric_depth_img=self.frame.depth))
-        # _, best_poses = try_opt(best_poses, 85, use_depth=True, rndr=render, use_roi=True)# do a few optimization steps with depth
+        self.set_observation(PosedObservation(rgb=self.frame.rgb, camera=self.frame.camera, dino_fn=self.frame._dino_fn, metric_depth_img=self.frame.depth), extrapolate_velocity=False)
+        _, best_poses = try_opt(best_poses, 10, use_depth=True, rndr=render, use_roi=True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_poses,
@@ -293,25 +294,20 @@ class RigidGroupOptimizer:
             else:
                 for i in reversed(range(len(self.group_masks))):
                     camera = frame.roi_frames[i].camera
-                    outputs = self.sms_model.get_outputs(camera, tracking=True, BLOCK_WIDTH=8)
+                    outputs = self.sms_model.get_outputs(camera, tracking=True, obj_id=i, BLOCK_WIDTH=8)
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
-                    # import pdb; pdb.set_trace()
-                    # start_time = time.time()
                     feats_dict["real_dino"].append(frame.roi_frames[i].dino_feats)
-                    # print(f"Time to get DINO: {time.time() - start_time}")
-                    # import pdb; pdb.set_trace()
                     feats_dict["real_depth"].append(frame.roi_frames[i].depth)
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
                     feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
                     feats_dict["rendered_depth"].append(outputs['depth'])
                     feats_dict["object_mask"].append(outputs['accumulation']>0.8)
-                # import matplotlib.pyplot as plt
-                # import pdb; pdb.set_trace()
+
                 for key in feats_dict.keys():
                     for i in range(len(self.group_masks)):
                         feats_dict[key][i] = feats_dict[key][i].contiguous().view(-1, feats_dict[key][i].shape[-1])
                     feats_dict[key] = torch.cat(feats_dict[key])
-                
+
         loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
         
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
@@ -557,16 +553,22 @@ class RigidGroupOptimizer:
         """
         with torch.no_grad():
             outputs = self.sms_model.get_outputs(cam,tracking=True,obj_id=obj_id, BLOCK_WIDTH=8)
-            object_mask = outputs["accumulation"] > 0.8
+            object_mask = outputs["accumulation"] > 0.9
             valids = torch.where(object_mask)
             # import pdb; pdb.set_trace()
             if ~object_mask.any():
                 raise RuntimeError("Object left ROI")
             valid_xs = valids[1]/object_mask.shape[1]
-            valid_ys = valids[0]/object_mask.shape[0]#normalize to 0-1
+            valid_ys = valids[0]/object_mask.shape[0] # normalize to 0-1
             # import pdb; pdb.set_trace()
-            inflate_amnt = (self.config.roi_inflate*(valid_xs.max() - valid_xs.min()).item(),
-                            self.config.roi_inflate*(valid_ys.max() - valid_ys.min()).item())# x, y
+            inflate_amnt = (
+                max((self.config.roi_inflate_proportion*(valid_xs.max() - valid_xs.min()).item()), (self.config.roi_inflate/cam.width.item())),
+                max((self.config.roi_inflate_proportion*(valid_ys.max() - valid_ys.min()).item()), (self.config.roi_inflate/cam.height.item()))
+            ) # x, y
+            
+            # import pdb; pdb.set_trace()
+            # inflate_amnt = (self.config.roi_inflate/cam.width.item(), self.config.roi_inflate/cam.width.item()) # fixed num pixels rather than mask proportion
+            
             xmin, xmax, ymin, ymax = max(0,valid_xs.min().item() - inflate_amnt[0]), min(1,valid_xs.max().item() + inflate_amnt[0]),\
                                 max(0,valid_ys.min().item() - inflate_amnt[1]), min(1,valid_ys.max().item() + inflate_amnt[1])
             return xmin, xmax, ymin, ymax
@@ -597,8 +599,9 @@ class RigidGroupOptimizer:
         if extrapolate_velocity and self.part_deltas.shape[0] > 1:
             if (self.prev_part_deltas != self.part_deltas).any().item():
                 with torch.no_grad():
-                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.08)
+                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.05)
                     self.part_deltas = torch.nn.Parameter(torch.cat([new_parts], dim=0))
                     
                 replace_in_optim(self.part_optimizer, [self.part_deltas])
                 zero_optim_state(self.part_optimizer)
+                # import pdb; pdb.set_trace()

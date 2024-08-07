@@ -263,7 +263,7 @@ def main(
                     opt.set_observation(left,opt.cam2world_ns,depth)
                     print("Set frame in ", time.time()-start_time3)
                     start_time5 = time.time()
-                    n_opt_iters = 9
+                    n_opt_iters = 7
                     with zed.raft_lock:
                         outputs = opt.step_opt(niter=n_opt_iters)
                     print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)

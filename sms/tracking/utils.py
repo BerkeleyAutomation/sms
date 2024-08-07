@@ -3,7 +3,7 @@ import torch
 from nerfstudio.cameras.cameras import Cameras
 from sms.tracking.transforms import SE3, SO3
 
-def extrapolate_poses(p1_7v, p2_7v,lam):
+def extrapolate_poses(p1_7v, p2_7v, lam):
     ext_7v = []
     for i in range(len(p2_7v)):
         r1 = SO3(p1_7v[i,3:])
@@ -13,7 +13,10 @@ def extrapolate_poses(p1_7v, p2_7v,lam):
         t_2_1 = t1.inverse() @ t2
         delta_pos = t_2_1.translation()*lam
         delta_rot = SO3.exp((t_2_1.rotation().log()*lam*3.5))
-        new_t = (t2 @ SE3.from_rotation_and_translation(delta_rot, delta_pos))
+        if delta_pos.norm().item() < 0.05: # Threshold for small deltas to avoid oscillations
+            new_t = t2
+        else:
+            new_t = (t2 @ SE3.from_rotation_and_translation(delta_rot, delta_pos))
         ext_7v.append(new_t.wxyz_xyz.roll(3,dims=-1))
     return torch.stack(ext_7v)
 
