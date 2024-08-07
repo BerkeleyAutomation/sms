@@ -357,6 +357,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.toggle_rgb_cluster = ViewerButton(name="Toggle RGB/Cluster", cb_hook=self._togglergbcluster, disabled=False)
         self.cluster_scene_shuffle_colors = ViewerButton(name="Reshuffle Cluster Colors", cb_hook=self._reshuffle_cluster_colors, disabled=False)
         self.cluster_labels = None
+        self.mapping = None # maps tracked object_id to cluster label
         self.rgb1_cluster0 = True
         self.temp_opacities = None
         self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
@@ -763,9 +764,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
         W, H = int(camera.width[0] * camera_scale_fac), int(camera.height[0] * camera_scale_fac)
         self.last_size = (H, W)
         
-        # import pdb; pdb.set_trace()
         if obj_id is not None:
-            crop_ids = torch.where(self.cluster_labels[self.keep_inds] == obj_id)[0]
+            crop_ids = torch.where(self.cluster_labels[self.keep_inds] == self.mapping[obj_id].item())[0]
             
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]

@@ -19,6 +19,7 @@ from sms.tracking.toad_object import ToadObject
 import open3d as o3d
 import pyzed.sl as sl
 import json
+import cv2
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
@@ -262,17 +263,26 @@ def main(
                     opt.set_observation(left,opt.cam2world_ns,depth)
                     print("Set frame in ", time.time()-start_time3)
                     start_time5 = time.time()
-                    n_opt_iters = 20
+                    n_opt_iters = 15
                     with zed.raft_lock:
                         outputs = opt.step_opt(niter=n_opt_iters)
                     print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
                     # Add ZED img and GS render to viser
+                    rgb_img = left.cpu().numpy()
+                    for i in range(len(opt.group_masks)):
+                        frame = opt.optimizer.frame.roi_frames[i]
+                        xmin = frame.xmin
+                        xmax = frame.xmax
+                        ymin = frame.ymin
+                        ymax = frame.ymax
+                        rgb_img = cv2.rectangle(rgb_img, (xmin, ymin), (xmax, ymax),(255,0,0), 2)
+                        
                     server.add_image(
                         "cam/zed_left",
-                        left.cpu().detach().numpy(),
-                        render_width=left.shape[1]/2500,
-                        render_height=left.shape[0]/2500,
+                        rgb_img,
+                        render_width=rgb_img.shape[1]/2500,
+                        render_height=rgb_img.shape[0]/2500,
                         position = (0.5, 0.5, 0.5),
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
@@ -283,8 +293,8 @@ def main(
                     server.add_image(
                         "cam/gs_render",
                         outputs["rgb"].cpu().detach().numpy(),
-                        render_width=left.shape[1]/2500,
-                        render_height=left.shape[0]/2500,
+                        render_width=outputs["rgb"].shape[1]/2500,
+                        render_height=outputs["rgb"].shape[0]/2500,
                         position = (0.5, -0.5, 0.5),
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True

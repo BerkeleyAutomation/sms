@@ -7,7 +7,7 @@ from tqdm import tqdm
 from torchvision import transforms
 from typing import Tuple
 import numpy as np
-
+from PIL import Image
 #Denoisier
 import os
 import sys
@@ -91,7 +91,6 @@ class DinoV2DataLoader(FeatureDataloader):
         return self.data[img_ind].to(self.device)
 
 class DinoDataloader(FeatureDataloader):
-    dino_model_type = "dinov2_vitl14"
     dino_stride = 14
     dino_layer = 11
     dino_facet = "key"
@@ -105,7 +104,9 @@ class DinoDataloader(FeatureDataloader):
         cache_path: str = None,
         pca_dim: int = 64,
         use_denoiser: bool = True,
+        dino_model_type = "dinov2_vits14",
     ):
+        self.dino_model_type = dino_model_type
         assert "image_shape" in cfg
         self.extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
         self.use_denoiser = use_denoiser
@@ -148,8 +149,6 @@ class DinoDataloader(FeatureDataloader):
         super().__init__(cfg, device, image_list, cache_path)
         print("Dino data shape", self.data.shape)
         
-        
-           
     def create(self, image_list):
         self.data = self.get_dino_feats(image_list)
         data_shape = self.data.shape
@@ -158,7 +157,29 @@ class DinoDataloader(FeatureDataloader):
             self.data = torch.matmul(self.data.view(-1, data_shape[-1]), self.pca_matrix).reshape((*data_shape[:-1], self.pca_dim))
         else:
             self.pca_matrix = torch.eye(data_shape[-1])
+    
+    def gen_pca_mat(self, image_list_path):
+        transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+        image_files = [f for f in os.listdir(image_list_path) if f.endswith('.png')]
+        image_tensors = []
+        for image_file in image_files:
+            image_path = os.path.join(image_list_path, image_file)
+            image = Image.open(image_path).convert('RGB')  # Ensure 3 color channels
+            image_tensor = transform(image)
+            image_tensors.append(image_tensor)
 
+        # Stack all tensors into a single batched tensor
+        batched_tensor = torch.stack(image_tensors)
+        self.data = self.get_dino_feats(batched_tensor)
+        # self.extractor.model.norm.normalized_shape[0]
+        data_shape = self.data.shape
+        if self.pca_dim != self.data.shape[-1]:
+            self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim,niter=20)[2]
+        else:
+            self.pca_matrix = torch.eye(data_shape[-1])
+            
     def load(self):
         super().load()
         if self.use_denoiser:

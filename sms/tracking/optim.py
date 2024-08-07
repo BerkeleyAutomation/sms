@@ -97,8 +97,8 @@ class Optimizer:
         assert self.viewer_ns.train_lock is not None
 
         self.keep_inds = None
-
         self.group_labels, self.group_masks, self.group_masks_global = self._setup_crops_and_groups()
+        
         self.max_relevancy_label = None
         self.max_relevancy_text = None
 
@@ -107,14 +107,18 @@ class Optimizer:
         # Init DINO dataloader for 'Frames' extractor_fn
         cache_dir = config_path.parent.parent.parent
         dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
-        
+        # image_cache_path = Path(osp.join(self.pipeline.datamanager.get_datapath(), "img"))
         self.dino_dataloader = DinoDataloader(
             image_list = None,
             device = 'cuda',
             cfg={"image_shape": [719, 1279]}, #HARDCODED BAD
             cache_path=dino_cache_path,
+            dino_model_type = 'dinov2_vits14',
             use_denoiser=False,
         )
+        # self.dino_dataloader.gen_pca_mat(image_cache_path)
+        # import pdb; pdb.set_trace()
+        
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)
 
@@ -207,7 +211,7 @@ class Optimizer:
     
     def _cluster_interactively(self):
         _ = input("Model populated (interactively crop and press enter to continue)")
-        self.keep_inds = self.pipeline.keep_inds
+        self.keep_inds = self.pipeline.model.keep_inds
         
         keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
         keep_inds_mask[self.keep_inds] = 1
@@ -246,11 +250,10 @@ class Optimizer:
                 cluster_labels, keep_inds_mask, cluster_labels_global = self._cluster_interactively()
                 print("Clustered interactively")
 
-        mapping, cluster_labels_keep = torch.unique(cluster_labels, return_inverse=True)
+        self.pipeline.model.mapping, cluster_labels_keep = torch.unique(cluster_labels, return_inverse=True)
         group_masks = [(cid == cluster_labels_keep).cuda() for cid in range(cluster_labels_keep.max().item() + 1)]
         
-        group_masks_global = [((cid == cluster_labels_global) & keep_inds_mask).cuda() for cid in mapping]
-        
+        group_masks_global = [((cid == cluster_labels_global) & keep_inds_mask).cuda() for cid in self.pipeline.model.mapping]
         return cluster_labels_keep.int().cuda(), group_masks, group_masks_global
 
     def set_frame(self, rgb, ns_camera, depth) -> None:

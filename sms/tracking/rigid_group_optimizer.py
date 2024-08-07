@@ -35,14 +35,14 @@ class RigidGroupOptimizerConfig:
     rank_loss_erode: int = 5
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
-    pose_lr: float = 0.001
-    pose_lr_final: float = 0.0001
+    pose_lr: float = 0.005
+    pose_lr_final: float = 0.0005
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
     clip_grad: float = 0.8
     use_roi = True
-    roi_inflate: float = 0.35
+    roi_inflate: float = 0.25
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -71,13 +71,6 @@ class RigidGroupOptimizer:
         self.is_initialized = False
         self.hand_lefts = [] #list of bools for each hand frame
         self.sms_model = sms_model
-        # detach all the params to avoid retain_graph issue
-        # self.sms_model.gauss_params["means"] = self.sms_model.gauss_params[
-        #     "means"
-        # ].detach().clone()
-        # self.sms_model.gauss_params["quats"] = self.sms_model.gauss_params[
-        #     "quats"
-        # ].detach().clone()
 
         self.group_labels = group_labels
         self.group_masks = group_masks
@@ -107,8 +100,8 @@ class RigidGroupOptimizer:
         self.init_means = self.sms_model.gauss_params["means"].detach().clone()
         self.init_quats = self.sms_model.gauss_params["quats"].detach().clone()
         self.init_opacities = self.sms_model.gauss_params["opacities"].detach().clone()
-        # Save the initial object to world transform, and initial part to object transforms
-
+        
+        # Save the initial initial part to object transforms
         self.init_p2w = torch.empty(len(self.group_masks), 4, 4, dtype=torch.float32, device="cuda")
         self.init_p2w_7vec = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
         self.init_p2w_7vec[:,3] = 1.0
@@ -167,8 +160,7 @@ class RigidGroupOptimizer:
         whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
         whole_pose_adj[:, 3:] = quat
         loss, final_poses = try_opt(whole_pose_adj, niter, False, render)
-        # import pdb
-        # pdb.set_trace()
+
         if loss is not None and loss < best_loss:
             best_loss = loss
             # best_outputs = outputs
@@ -303,7 +295,11 @@ class RigidGroupOptimizer:
                     camera = frame.roi_frames[i].camera
                     outputs = self.sms_model.get_outputs(camera, tracking=True, BLOCK_WIDTH=8)
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
+                    import pdb; pdb.set_trace()
+                    start_time = time.time()
                     feats_dict["real_dino"].append(frame.roi_frames[i].dino_feats)
+                    print(f"Time to get DINO: {time.time() - start_time}")
+                    import pdb; pdb.set_trace()
                     feats_dict["real_depth"].append(frame.roi_frames[i].depth)
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
                     feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
@@ -563,10 +559,12 @@ class RigidGroupOptimizer:
             outputs = self.sms_model.get_outputs(cam,tracking=True,obj_id=obj_id, BLOCK_WIDTH=8)
             object_mask = outputs["accumulation"] > 0.8
             valids = torch.where(object_mask)
+            # import pdb; pdb.set_trace()
             if ~object_mask.any():
-                raise RuntimeError("Mask went offscreen")
+                raise RuntimeError("Object left ROI")
             valid_xs = valids[1]/object_mask.shape[1]
             valid_ys = valids[0]/object_mask.shape[0]#normalize to 0-1
+            # import pdb; pdb.set_trace()
             inflate_amnt = (self.config.roi_inflate*(valid_xs.max() - valid_xs.min()).item(),
                             self.config.roi_inflate*(valid_ys.max() - valid_ys.min()).item())# x, y
             xmin, xmax, ymin, ymax = max(0,valid_xs.min().item() - inflate_amnt[0]), min(1,valid_xs.max().item() + inflate_amnt[0]),\

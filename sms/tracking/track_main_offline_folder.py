@@ -153,11 +153,20 @@ def main(
             print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
             # Add ZED img and GS render to viser
+            rgb_img = left.cpu().numpy()
+            for i in range(len(toad_opt.group_masks)):
+                frame = toad_opt.optimizer.frame.roi_frames[i]
+                xmin = frame.xmin
+                xmax = frame.xmax
+                ymin = frame.ymin
+                ymax = frame.ymax
+                rgb_img = cv2.rectangle(rgb_img, (xmin, ymin), (xmax, ymax),(255,0,0), 2)
+                
             server.add_image(
                 "cam/zed_left",
-                left.cpu().detach().numpy(),
-                render_width=left.shape[1]/2500,
-                render_height=left.shape[0]/2500,
+                rgb_img,
+                render_width=rgb_img.shape[1]/2500,
+                render_height=rgb_img.shape[0]/2500,
                 position = (0.5, -0.5, 0.5),
                 wxyz=(0, -0.7071068, -0.7071068, 0),
                 visible=True
@@ -168,8 +177,8 @@ def main(
             server.add_image(
                 "cam/gs_render",
                 outputs["rgb"].cpu().detach().numpy(),
-                render_width=left.shape[1]/2500,
-                render_height=left.shape[0]/2500,
+                render_width=outputs["rgb"].shape[1]/2500,
+                render_height=outputs["rgb"].shape[0]/2500,
                 position = (0.5, 0.5, 0.5),
                 wxyz=(0, -0.7071068, -0.7071068, 0),
                 visible=True
