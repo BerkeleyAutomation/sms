@@ -171,8 +171,6 @@ def main(
                 wxyz=(0, -0.7071068, -0.7071068, 0),
                 visible=True
             )
-            if save_videos:
-                real_frames.append(left.cpu().detach().numpy())
             
             server.add_image(
                 "cam/gs_render",
@@ -184,6 +182,8 @@ def main(
                 visible=True
             )
             if save_videos:
+                real_frames.append(rgb_img)
+                # real_frames.append(left) # Switch to this for no ROI bbox
                 rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
             
             tf_list = toad_opt.get_parts2world()

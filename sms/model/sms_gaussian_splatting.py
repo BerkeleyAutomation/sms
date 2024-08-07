@@ -715,7 +715,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
         return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
 
-    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None, BLOCK_WIDTH=16) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None, BLOCK_WIDTH=16, rgb_only = False) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -857,6 +857,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
         rgb = render[:, ..., :3] + (1 - alpha) * background
         rgb = torch.clamp(rgb, 0.0, 1.0)
         outputs["rgb"] = rgb.squeeze(0)
+        if rgb_only:
+            return outputs
         if render_mode == "RGB+ED":
             depth_im = render[:, ..., 3:4]
             depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)

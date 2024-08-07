@@ -35,14 +35,14 @@ class RigidGroupOptimizerConfig:
     rank_loss_erode: int = 5
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
-    pose_lr: float = 0.005
-    pose_lr_final: float = 0.0005
+    pose_lr: float = 0.006
+    pose_lr_final: float = 0.0003
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
     clip_grad: float = 0.8
     use_roi = True
-    roi_inflate: float = 0.25
+    roi_inflate: float = 0.35
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -295,11 +295,11 @@ class RigidGroupOptimizer:
                     camera = frame.roi_frames[i].camera
                     outputs = self.sms_model.get_outputs(camera, tracking=True, BLOCK_WIDTH=8)
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
-                    import pdb; pdb.set_trace()
-                    start_time = time.time()
+                    # import pdb; pdb.set_trace()
+                    # start_time = time.time()
                     feats_dict["real_dino"].append(frame.roi_frames[i].dino_feats)
-                    print(f"Time to get DINO: {time.time() - start_time}")
-                    import pdb; pdb.set_trace()
+                    # print(f"Time to get DINO: {time.time() - start_time}")
+                    # import pdb; pdb.set_trace()
                     feats_dict["real_depth"].append(frame.roi_frames[i].depth)
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
                     feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
@@ -392,8 +392,8 @@ class RigidGroupOptimizer:
                 self.apply_to_model(
                         self.part_deltas, self.group_labels
                     )
-                # if self.config.use_roi:
-                #     outputs = self.sms_model.get_outputs(self.frame.frame.camera, tracking=True)
+                if self.config.use_roi:
+                    outputs = self.sms_model.get_outputs(self.frame.frame.camera, tracking=True, rgb_only=True)
         return {k:i.detach() for k,i in outputs.items()}
 
     def apply_to_model(self, part_deltas, group_labels):
@@ -597,7 +597,7 @@ class RigidGroupOptimizer:
         if extrapolate_velocity and self.part_deltas.shape[0] > 1:
             if (self.prev_part_deltas != self.part_deltas).any().item():
                 with torch.no_grad():
-                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.10)
+                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.08)
                     self.part_deltas = torch.nn.Parameter(torch.cat([new_parts], dim=0))
                     
                 replace_in_optim(self.part_optimizer, [self.part_deltas])

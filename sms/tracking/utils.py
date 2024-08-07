@@ -12,7 +12,7 @@ def extrapolate_poses(p1_7v, p2_7v,lam):
         t2 = SE3.from_rotation_and_translation(r2, p2_7v[i,:3])
         t_2_1 = t1.inverse() @ t2
         delta_pos = t_2_1.translation()*lam
-        delta_rot = SO3.exp((t_2_1.rotation().log()*lam))
+        delta_rot = SO3.exp((t_2_1.rotation().log()*lam*3.5))
         new_t = (t2 @ SE3.from_rotation_and_translation(delta_rot, delta_pos))
         ext_7v.append(new_t.wxyz_xyz.roll(3,dims=-1))
     return torch.stack(ext_7v)

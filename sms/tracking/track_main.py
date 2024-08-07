@@ -32,7 +32,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_drill_battery2/sms-data/2024-07-31_032305/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_drill_battery3/sms-data/2024-08-06_210320/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -263,7 +263,7 @@ def main(
                     opt.set_observation(left,opt.cam2world_ns,depth)
                     print("Set frame in ", time.time()-start_time3)
                     start_time5 = time.time()
-                    n_opt_iters = 15
+                    n_opt_iters = 9
                     with zed.raft_lock:
                         outputs = opt.step_opt(niter=n_opt_iters)
                     print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
@@ -287,9 +287,7 @@ def main(
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
-                    if save_videos:
-                        real_frames.append(left.cpu().detach().numpy())
-                    
+
                     server.add_image(
                         "cam/gs_render",
                         outputs["rgb"].cpu().detach().numpy(),
@@ -300,6 +298,8 @@ def main(
                         visible=True
                     )
                     if save_videos:
+                        real_frames.append(rgb_img)
+                        # real_frames.append(left.cpu().detach().numpy()) # Switch to this for no ROI bbox
                         rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
                     
                     tf_list = opt.get_parts2world()
