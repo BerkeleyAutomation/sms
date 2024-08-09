@@ -5,7 +5,6 @@ import numpy as np
 from typing import List, Optional, Literal, Callable
 import kornia
 from sms.model.sms_gaussian_splatting import smsGaussianSplattingModel
-from sms.data.utils.dino_dataloader2 import DinoDataloader
 from contextlib import nullcontext
 from nerfstudio.engine.schedulers import (
     ExponentialDecayScheduler,
@@ -37,13 +36,14 @@ class RigidGroupOptimizerConfig:
     use_atap: bool = False
     pose_lr: float = 0.003
     pose_lr_final: float = 0.0005
+    rot_lr_scaler: float = 3.0
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
     clip_grad: float = 0.8
     use_roi = True
     roi_inflate_proportion: float = 0.25
-    roi_inflate: float = 100
+    roi_inflate: float = 75
     
 class RigidGroupOptimizer:
     """From: part, To: object. in current world frame. Part frame is centered at part centroid, and object frame is centered at object centroid."""
@@ -300,9 +300,10 @@ class RigidGroupOptimizer:
                     feats_dict["real_depth"].append(frame.roi_frames[i].depth)
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
                     feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
+                    # feats_dict["rendered_dino"].append(outputs['dino'])
                     feats_dict["rendered_depth"].append(outputs['depth'])
                     feats_dict["object_mask"].append(outputs['accumulation']>0.8)
-
+                # import pdb; pdb.set_trace()
                 for key in feats_dict.keys():
                     for i in range(len(self.group_masks)):
                         feats_dict[key][i] = feats_dict[key][i].contiguous().view(-1, feats_dict[key][i].shape[-1])
@@ -318,12 +319,12 @@ class RigidGroupOptimizer:
             valids = feats_dict["object_mask"] & (~feats_dict["real_depth"].isnan())
             if use_hand_mask:
                 valids = valids & frame.hand_mask.unsqueeze(-1)
-            physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=2.0)[valids]
-            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=2.0)[valids]
-        
-
+            physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=2.0) #[valids]
+            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=2.0) #[valids]
             pix_loss = (physical_depth_clamped - real_depth_clamped) ** 2
-
+            pix_loss = pix_loss[
+                    valids & (pix_loss < self.config.depth_ignore_threshold**2)
+                ]
             if self.use_wandb:
                 wandb.log({"depth_loss": pix_loss.mean().item()})
             if not torch.isnan(pix_loss.mean()).any():
@@ -372,6 +373,7 @@ class RigidGroupOptimizer:
                 tape.backward()
             # torch.nn.utils.clip_grad_norm_(self.part_deltas, self.config.clip_grad)
             # import pdb; pdb.set_trace()
+            self.part_deltas.grad[:, 3:]*=self.config.rot_lr_scaler
             self.part_optimizer.step()
             part_scheduler.step()
             if self.use_wandb:
@@ -552,7 +554,8 @@ class RigidGroupOptimizer:
         Calculate the ROI for the object given a certain camera pose and object index
         """
         with torch.no_grad():
-            outputs = self.sms_model.get_outputs(cam,tracking=True,obj_id=obj_id, BLOCK_WIDTH=8)
+            outputs = self.sms_model.get_outputs(cam,tracking=True, obj_id=obj_id, BLOCK_WIDTH=8)
+            # import pdb; pdb.set_trace()
             object_mask = outputs["accumulation"] > 0.9
             valids = torch.where(object_mask)
             # import pdb; pdb.set_trace()
@@ -599,9 +602,9 @@ class RigidGroupOptimizer:
         if extrapolate_velocity and self.part_deltas.shape[0] > 1:
             if (self.prev_part_deltas != self.part_deltas).any().item():
                 with torch.no_grad():
-                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.05)
+                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.1)
+                    # import pdb; pdb.set_trace()
                     self.part_deltas = torch.nn.Parameter(torch.cat([new_parts], dim=0))
                     
                 replace_in_optim(self.part_optimizer, [self.part_deltas])
                 zero_optim_state(self.part_optimizer)
-                # import pdb; pdb.set_trace()

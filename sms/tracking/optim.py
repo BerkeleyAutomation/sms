@@ -28,6 +28,7 @@ from sms.data.utils.dino_dataloader2 import DinoDataloader
 import os.path as osp
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 import open3d as o3d
+from sms.data.utils.featup_dataloader2 import FeatupDataloader
 
 class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
@@ -57,6 +58,9 @@ class Optimizer:
 
     initialized: bool = False
     """Whether the object pose has been initialized. This is set to `False` at `ToadOptimizer` initialization."""
+    
+    # use_featup: bool = False
+    """Whether to use FeatUp https://github.com/mhamilton723/FeatUp"""
 
     def __init__(
         self,
@@ -67,6 +71,7 @@ class Optimizer:
         init_cam_pose: torch.Tensor,  # initial camera pose in OpenCV format
     ):
         self.config_path = config_path
+        # import pdb; pdb.set_trace()
         clusters = config_path.parent.parent.parent.joinpath("clusters.npy") # For preloading the cluster info for pre-clustered objects instead of clustering interactively
         print("clusters file", clusters)
         if not clusters.exists():
@@ -105,19 +110,28 @@ class Optimizer:
         self.num_groups = len(self.group_masks)
         
         # Init DINO dataloader for 'Frames' extractor_fn
-        cache_dir = config_path.parent.parent.parent
-        dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
+        # cache_dir = config_path.parent.parent.parent
+        # dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
         # image_cache_path = Path(osp.join(self.pipeline.datamanager.get_datapath(), "img"))
-        self.dino_dataloader = DinoDataloader(
-            image_list = None,
-            device = 'cuda',
-            cfg={"image_shape": [719, 1279]}, #HARDCODED BAD
-            cache_path=dino_cache_path,
-            dino_model_type = 'dinov2_vits14',
-            use_denoiser=False,
-        )
-        # self.dino_dataloader.gen_pca_mat(image_cache_path)
+        
         # import pdb; pdb.set_trace()
+        # if self.use_featup:
+        #     self.dino_dataloader = FeatupDataloader(
+        #         image_list=None,
+        #         device='cuda',
+        #         cfg={"model_type": "dinov2", 
+        #              "image_shape": [719, 1279]}, #HARDCODED BAD
+        #         cache_path=dino_cache_path,
+        #     )
+        # else:
+        #     self.dino_dataloader = DinoDataloader(
+        #         image_list = None,
+        #         device = 'cuda',
+        #         cfg={"image_shape": [719, 1279]}, #HARDCODED BAD
+        #         cache_path=dino_cache_path,
+        #         dino_model_type = 'dinov2_vits14',
+        #         use_denoiser=False,
+        #     )
         
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)
@@ -260,7 +274,7 @@ class Optimizer:
         """Set the first frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
         
-        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
+        frame = Frame(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.pipeline.datamanager.dino_dataloader.get_pca_feats, metric_depth_img=depth)
         
         self.optimizer.set_frame(frame)
         
@@ -268,7 +282,7 @@ class Optimizer:
         """Set the frame for the optimizer -- doesn't optimize the poses yet."""
         target_frame_rgb = (rgb/255)
         
-        frame = PosedObservation(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.dino_dataloader.get_pca_feats, metric_depth_img=depth)
+        frame = PosedObservation(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.pipeline.datamanager.dino_dataloader.get_pca_feats, metric_depth_img=depth)
         
         self.optimizer.set_observation(frame)
 

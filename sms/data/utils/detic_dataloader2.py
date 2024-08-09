@@ -47,7 +47,6 @@ from sms.data.utils.Detic.detic.config import add_detic_config
 from sms.data.utils.Detic.detic.modeling.utils import reset_cls_test
 from sklearn.cluster import DBSCAN
 import matplotlib.patches as patches
-from segment_anything import sam_model_registry, SamPredictor
 import torch.nn.functional as F
 
 class DeticDataloader(FeatureDataloader):
@@ -81,6 +80,7 @@ class DeticDataloader(FeatureDataloader):
         self.detic_predictor = DefaultPredictor(cfg)
 
         if self.sam == True:
+            from segment_anything import sam_model_registry, SamPredictor
             sam_checkpoint = "../sam_model/sam_vit_h_4b8939.pth"
             model_type = "vit_h"
             sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)

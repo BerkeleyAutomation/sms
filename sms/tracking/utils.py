@@ -3,7 +3,7 @@ import torch
 from nerfstudio.cameras.cameras import Cameras
 from sms.tracking.transforms import SE3, SO3
 
-def extrapolate_poses(p1_7v, p2_7v, lam):
+def extrapolate_poses(p1_7v, p2_7v, lam, rot_scale_factor=3.0, thresh=True):
     ext_7v = []
     for i in range(len(p2_7v)):
         r1 = SO3(p1_7v[i,3:])
@@ -12,8 +12,8 @@ def extrapolate_poses(p1_7v, p2_7v, lam):
         t2 = SE3.from_rotation_and_translation(r2, p2_7v[i,:3])
         t_2_1 = t1.inverse() @ t2
         delta_pos = t_2_1.translation()*lam
-        delta_rot = SO3.exp((t_2_1.rotation().log()*lam*3.5))
-        if delta_pos.norm().item() < 0.05: # Threshold for small deltas to avoid oscillations
+        delta_rot = SO3.exp((t_2_1.rotation().log() * lam * rot_scale_factor))
+        if thresh and delta_pos.norm().item() < 0.05: # Threshold for small deltas to avoid oscillations
             new_t = t2
         else:
             new_t = (t2 @ SE3.from_rotation_and_translation(delta_rot, delta_pos))
@@ -35,30 +35,6 @@ def replace_in_optim(optimizer:torch.optim.Adam, new_params):
     """replaces the parameters in the optimizer"""
     param = optimizer.param_groups[0]["params"][0]
     param_state = optimizer.state[param]
-    # if "max_exp_avg_sq" in param_state:
-    #     # for amsgrad
-    #     param_state["max_exp_avg_sq"] = torch.cat(
-    #         [
-    #             param_state["max_exp_avg_sq"],
-    #             param_state["max_exp_avg_sq"][-1].unsqueeze(0)
-    #         ],
-    #         dim=0,
-    #     )
-    # if "exp_avg" in param_state:
-    #     param_state["exp_avg"] = torch.cat(
-    #         [
-    #             param_state["exp_avg"],
-    #             param_state["exp_avg"][-1].unsqueeze(0)
-    #         ],
-    #         dim=0,
-    #     )
-    #     param_state["exp_avg_sq"] = torch.cat(
-    #         [
-    #             param_state["exp_avg_sq"],
-    #             param_state["exp_avg_sq"][-1].unsqueeze(0)
-    #         ],
-    #         dim=0,
-    #     )
 
     del optimizer.state[param]
     optimizer.state[new_params[0]] = param_state

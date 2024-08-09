@@ -32,7 +32,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240730_drill_battery3/sms-data/2024-08-06_210320/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/0808_drill_battery_nofeatup/sms-data/2024-08-09_113806/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -283,7 +283,7 @@ def main(
                         rgb_img,
                         render_width=rgb_img.shape[1]/2500,
                         render_height=rgb_img.shape[0]/2500,
-                        position = (0.5, 0.5, 0.5),
+                        position = (0.5, -0.5, 0.5),
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
@@ -293,7 +293,7 @@ def main(
                         outputs["rgb"].cpu().detach().numpy(),
                         render_width=outputs["rgb"].shape[1]/2500,
                         render_height=outputs["rgb"].shape[0]/2500,
-                        position = (0.5, -0.5, 0.5),
+                        position = (0.5, 0.5, 0.5),
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )

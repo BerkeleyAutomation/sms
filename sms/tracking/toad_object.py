@@ -22,7 +22,7 @@ grasp_ply_filepath = os.path.join(dir_path,'../ur5_interface/ur5_interface/scrip
 sys.path.append(grasp_ply_filepath)
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True) #, kw_only=True)
 class ToadObject:
     """
     Note that all objects/parts/grasps are stored in *metric* scale, not nerfstudio.
@@ -251,7 +251,7 @@ class ToadObject:
         return cls(**toad_data)
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True)#, kw_only=True)
 class GraspableToadObject(ToadObject):
     # grasps: List[torch.Tensor]
     """List of grasps, of length N_clusters. Each element is a tensor of shape (N_grasps, 7), for grasp center and axis (quat). (xyz_wxyz)"""

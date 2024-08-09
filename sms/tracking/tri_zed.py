@@ -169,7 +169,7 @@ class Zed():
     cam_to_zed: RigidTransform
     """Transform from left camera to ZED camera base."""
 
-    def __init__(self, cam_id=None, recording_file = None, start_time = 0.0,is_res_1080=False):
+    def __init__(self, cam_id=None, recording_file = None, start_time = 0.0, is_res_1080=False):
         init = sl.InitParameters()
         if cam_id is not None:
             init.set_from_serial_number(cam_id)
@@ -321,7 +321,9 @@ class Zed():
         else:
             intrinsics = calib.right_cam
         r = self.width/self.init_res
-        K = np.array([[intrinsics.fx*r, 0, intrinsics.cx*r], [0, intrinsics.fy*r, intrinsics.cy*r], [0, 0, 1]])
+        K = np.array([[intrinsics.fx*r, 0, intrinsics.cx*r], 
+                      [0, intrinsics.fy*r, intrinsics.cy*r], 
+                      [0, 0, 1]])
         return K
 
     def get_stereo_transform(self):

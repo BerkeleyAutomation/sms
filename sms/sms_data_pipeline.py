@@ -398,7 +398,7 @@ class smsdataPipeline(VanillaPipeline):
         prev_state = self.state_stack[-1]
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
-        self.model_keep_inds = keep_inds
+        self.model.keep_inds = keep_inds
         self._export_clusters(None)
         self.z_export_options_cluster_labels.visible = True
 
@@ -506,7 +506,7 @@ class smsdataPipeline(VanillaPipeline):
             
             sphere_inds_keep = [(torch.where(keep_inds_list == torch.tensor(sphere_inds)[i])[0]).item() for i in sphere_ind_vote.tolist()]
             # Secondary clustering in cartesian space to filter outliers
-            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.013, min_points=1)
+            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.007, min_points=1)
             inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
             keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
             keep_list = [keep_inds_list[keep_inds_list_inner]]
@@ -514,7 +514,7 @@ class smsdataPipeline(VanillaPipeline):
         table_bounding_cube_filename = self.datamanager.get_datapath().joinpath("table_bounding_cube.json")
         with open(table_bounding_cube_filename, 'r') as json_file: 
             bounding_box_dict = json.load(json_file)
-        table_z_val = bounding_box_dict['table_height'] + 0.008 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
+        table_z_val = bounding_box_dict['table_height'] + 0.01 # Removes everything below this value to represent the table and anything below. Found 0.008 to be good value for this
         # table_z_val = -0.165 # z value of the table to filter out of our clusters
         keep_list = [keep_list[0][torch.where(curr_means[keep_list[0]][:,2] > table_z_val)[0].cpu()]] # filter out table points
         # Remove the click handle + visualization
@@ -623,12 +623,6 @@ class smsdataPipeline(VanillaPipeline):
         outputs = self.model.get_outputs(cam.to(self.device))
         self.model.train()
         with torch.no_grad():
-            # if (pix_y > outputs["depth"].shape[0] or 
-            #     pix_x > outputs["depth"].shape[1] or
-            #     pix_x < 0 or 
-            #     pix_y < 0):
-            #     print("Click bug triggered")
-            #     return False
             depth = outputs["depth"][pix_y, pix_x].cpu().numpy()
 
         self.click_location = np.array(click.origin) + np.array(click.direction) * (depth / z_dir)
@@ -650,8 +644,8 @@ class smsdataPipeline(VanillaPipeline):
         output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
         filename = Path(output_dir) / f"clusters.npy"
         
-        if self.model.cluster_labels is not None and self.model_keep_inds is not None:
-            np.save(filename, np.array([self.model.cluster_labels, self.model_keep_inds], dtype=object))
+        if self.model.cluster_labels is not None and self.model.keep_inds is not None:
+            np.save(filename, np.array([self.model.cluster_labels, self.model.keep_inds], dtype=object))
         else:
             print("No cluster labels to export")
     

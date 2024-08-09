@@ -41,6 +41,7 @@ URF_SIGMA_SCALE_FACTOR = 3.0
 class DepthLossType(Enum):
     """Types of depth losses for depth supervision."""
 
+    NONE = 0
     DS_NERF = 1
     URF = 2
     SPARSENERF_RANKING = 3

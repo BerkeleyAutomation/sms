@@ -234,8 +234,6 @@ class DinoDataloader(FeatureDataloader):
                     else:
                         dino_embeds.append(descriptors.cpu().detach())
                 
-         
-                
         return torch.stack(dino_embeds, dim=0)
     
     def get_pca_feats(self,image_list, keep_cuda = True):
