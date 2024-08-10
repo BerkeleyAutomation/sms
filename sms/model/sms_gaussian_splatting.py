@@ -69,8 +69,8 @@ import open3d as o3d
 import time
 from collections import OrderedDict
 
-# from sms.data.utils.dino_dataloader2 import get_img_resolution
-from sms.data.utils.featup_dataloader2 import get_img_resolution
+from sms.data.utils.dino_dataloader2 import get_img_resolution
+# from sms.data.utils.featup_dataloader2 import get_img_resolution
 from sklearn.neighbors import NearestNeighbors
 
 def random_quat_tensor(N):
@@ -598,8 +598,6 @@ class smsGaussianSplattingModel(SplatfactoModel):
         rgb = render[:, ..., :3] + (1 - alpha) * background
         rgb = torch.clamp(rgb, 0.0, 1.0)
         outputs["rgb"] = rgb.squeeze(0)
-        if rgb_only:
-            return outputs
         if render_mode == "RGB+ED":
             depth_im = render[:, ..., 3:4]
             depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
@@ -608,7 +606,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
         outputs["depth"] = depth_im
         outputs["accumulation"] = alpha.squeeze(0)
         outputs["background"] = background
-
+        if rgb_only:
+            return outputs
         if self.datamanager.use_clip or self.loaded_ckpt and not tracking:
             if (self.step - self.datamanager.lerf_step > 0):
                 if camera.metadata is not None:

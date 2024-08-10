@@ -50,7 +50,7 @@ from sms.data.utils.dino_dataloader2 import DinoDataloader
 from sms.data.utils.pyramid_embedding_dataloader2 import PyramidEmbeddingDataloader
 from sms.data.utils.detic_dataloader2 import DeticDataloader
 from sms.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
-from sms.data.utils.featup_dataloader2 import FeatupDataloader
+# from sms.data.utils.featup_dataloader2 import FeatupDataloader
 
 @dataclass
 class FullImageDatamanagerConfig(DataManagerConfig):
@@ -87,7 +87,7 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """The step at which to begin supervising clip and groups"""
     dino_step: int = 2000
     """The step at which to begin supervising dino"""
-    use_featup: bool = False    
+    # use_featup: bool = False    
 
 
 class FullImageDatamanager(DataManager, Generic[TDataset]):
@@ -161,22 +161,22 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             
         self.use_featup = self.config.use_featup
         # NOTE: cache config is sensitive to list vs. tuple, because it checks for dict equality
-        if self.use_featup:
-            self.dino_dataloader = FeatupDataloader(
-                image_list=images,
-                device=self.device,
-                cfg={"model_type": "dinov2", 
-                     "image_shape": list(images.shape[2:4])},
-                cache_path=dino_cache_path,
-            )
-        else:
-            self.dino_dataloader = DinoDataloader(
-                image_list = images,
-                device = self.device,
-                cfg={"image_shape": list(images.shape[2:4])},
-                cache_path=dino_cache_path,
-                use_denoiser=self.config.use_denoiser,
-            )
+        # if self.use_featup:
+        #     self.dino_dataloader = FeatupDataloader(
+        #         image_list=images,
+        #         device=self.device,
+        #         cfg={"model_type": "dinov2", 
+        #              "image_shape": list(images.shape[2:4])},
+        #         cache_path=dino_cache_path,
+        #     )
+        # else:
+        self.dino_dataloader = DinoDataloader(
+            image_list = images,
+            device = self.device,
+            cfg={"image_shape": list(images.shape[2:4])},
+            cache_path=dino_cache_path,
+            use_denoiser=self.config.use_denoiser,
+        )
         torch.cuda.empty_cache()
         self.clip_interpolator = PyramidEmbeddingDataloader(
             image_list=images,

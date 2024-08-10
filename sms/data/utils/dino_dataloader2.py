@@ -18,8 +18,23 @@ import sys
 # import DenoisingViT
 
 #usually 1260 max size
-def get_img_resolution(H, W, max_size = 1050, p=14):
-    if H<W:
+# def get_img_resolution(H, W, max_size = 1050, p=14):
+#     if H<W:
+#         new_W = max_size
+#         new_H = (int((H/W)*max_size)//p)*p
+#     else:
+#         new_H = max_size
+#         new_W = (int((W/H)*max_size)//p)*p
+#     return new_H, new_W
+def get_img_resolution(H, W, max_size = 1050, p = None, downsample = None):
+    if downsample:
+            if p is not None:
+                new_H = ((H//downsample)//p)*p
+                new_W = ((W//downsample)//p)*p
+            else:
+                new_H = H//downsample
+                new_W = W//downsample
+    elif H<W:
         new_W = max_size
         new_H = (int((H/W)*max_size)//p)*p
     else:
@@ -62,7 +77,7 @@ class DinoV2DataLoader(FeatureDataloader):
         image_list: BxCxHxW torch tensor
         returns: BxHxWxC torch tensor of features
         """
-        h,w = get_img_resolution(image_list.shape[2], image_list.shape[3])
+        h,w = get_img_resolution(image_list.shape[2], image_list.shape[3], p=14)
         preprocess = transforms.Compose([
                         transforms.Resize((h,w),antialias=True, interpolation=transforms.InterpolationMode.BICUBIC),
                         transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
@@ -197,7 +212,7 @@ class DinoDataloader(FeatureDataloader):
         np.save(cache_pca_path, self.pca_matrix.cpu().numpy())
 
     def get_dino_feats(self,image_list, keep_cuda=False):
-        h,w = get_img_resolution(image_list.shape[2], image_list.shape[3])
+        h,w = get_img_resolution(image_list.shape[2], image_list.shape[3], p=14)
         preprocess = transforms.Compose([
                         transforms.Resize((h,w),antialias=True, interpolation=transforms.InterpolationMode.BICUBIC),
                         transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),

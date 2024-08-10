@@ -28,7 +28,7 @@ from sms.data.utils.dino_dataloader2 import DinoDataloader
 import os.path as osp
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 import open3d as o3d
-from sms.data.utils.featup_dataloader2 import FeatupDataloader
+# from sms.data.utils.featup_dataloader2 import FeatupDataloader
 
 class Optimizer:
     """Wrapper around 1) RigidGroupOptimizer and 2) GraspableToadObject.
@@ -108,30 +108,6 @@ class Optimizer:
         self.max_relevancy_text = None
 
         self.num_groups = len(self.group_masks)
-        
-        # Init DINO dataloader for 'Frames' extractor_fn
-        # cache_dir = config_path.parent.parent.parent
-        # dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
-        # image_cache_path = Path(osp.join(self.pipeline.datamanager.get_datapath(), "img"))
-        
-        # import pdb; pdb.set_trace()
-        # if self.use_featup:
-        #     self.dino_dataloader = FeatupDataloader(
-        #         image_list=None,
-        #         device='cuda',
-        #         cfg={"model_type": "dinov2", 
-        #              "image_shape": [719, 1279]}, #HARDCODED BAD
-        #         cache_path=dino_cache_path,
-        #     )
-        # else:
-        #     self.dino_dataloader = DinoDataloader(
-        #         image_list = None,
-        #         device = 'cuda',
-        #         cfg={"image_shape": [719, 1279]}, #HARDCODED BAD
-        #         cache_path=dino_cache_path,
-        #         dino_model_type = 'dinov2_vits14',
-        #         use_denoiser=False,
-        #     )
         
         assert init_cam_pose.shape == (1, 3, 4)
         self.init_cam_pose = deepcopy(init_cam_pose)

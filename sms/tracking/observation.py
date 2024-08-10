@@ -44,6 +44,10 @@ class Frame:
     def hand_mask(self):
         return self._hand_mask.retrieve()
     
+    @property
+    def mask(self):
+        return self._mask.retrieve()
+    
     def __init__(self, rgb: torch.Tensor, camera: Cameras, dino_fn: Callable, metric_depth_img: Optional[torch.Tensor], 
                  xmin: Optional[float] = None, xmax: Optional[float] = None, ymin: Optional[float] = None, ymax: Optional[float] = None):
         # self.orig_camera = deepcopy(camera.to('cuda'))
@@ -56,13 +60,13 @@ class Frame:
                 antialias=True,
             ).permute(1, 2, 0)
         self.metric_depth = metric_depth_img is not None
+        self.obj_mask = None        
         @torch.no_grad()
         def _get_depth():
             if metric_depth_img is not None:
                 depth = metric_depth_img
             else:
                 raise FileNotFoundError
-                # depth = get_depth((rgb*255).to(torch.uint8))
             depth = resize(
                             depth.unsqueeze(0),
                             (camera.height, camera.width),
@@ -93,7 +97,15 @@ class Frame:
             )
             return hand_mask
         self._hand_mask = Future(_get_hand_mask)
-        
+        @torch.no_grad()
+        def _get_mask():
+            obj_mask = resize(
+                            self.obj_mask.unsqueeze(0),
+                            (camera.height, camera.width),
+                            antialias=True,
+                        ).squeeze(0)
+            return obj_mask
+        self._mask = Future(_get_mask)
         self.xmin, self.xmax, self.ymin, self.ymax = xmin, xmax, ymin, ymax
         
 
@@ -130,6 +142,8 @@ class PosedObservation:
         # cam.rescale_output_resolution(self.rasterize_resolution/max(camera.width.item(),camera.height.item()))
         self._frame = Frame(rgb, cam, dino_fn, metric_depth_img)
         self._roi_frames = []
+        self._obj_masks = None
+        
         
     @property
     def frame(self):

@@ -13,7 +13,7 @@ from nerfstudio.cameras.cameras import Cameras
 import warp as wp
 from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
-from sms.tracking.utils2 import generate_videos
+from sms.tracking.utils2 import generate_videos, overlay
 from sms.tracking.toad_object import ToadObject
 # import traceback 
 import open3d as o3d
@@ -277,6 +277,8 @@ def main(
                         ymin = frame.ymin
                         ymax = frame.ymax
                         rgb_img = cv2.rectangle(rgb_img, (xmin, ymin), (xmax, ymax),(255,0,0), 2)
+                        if opt.optimizer.frame._obj_masks is not None:
+                            rgb_img = overlay(rgb_img, mask = opt.optimizer.frame._obj_masks[i].detach().cpu(), color=((i+1)*100, 0, 255-i*100), alpha=0.3)
                         
                     server.add_image(
                         "cam/zed_left",
