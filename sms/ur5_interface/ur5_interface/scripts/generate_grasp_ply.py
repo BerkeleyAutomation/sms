@@ -29,12 +29,13 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     print(str(global_config))
     print('pid: %s'%(str(os.getpid())))
 
-    pred_grasps_cam,scores,pc_full,pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
+    pred_grasps_cam, scores, pc_full, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
                 K=K, local_regions=local_regions, filter_grasps=filter_grasps, segmap_id=segmap_id, 
                 forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=True)
 
-    best_scores = {0:scores[0][np.argsort(scores[0])[::-1]][:1]}
-    best_grasps = {0:pred_grasps_cam[0][np.argsort(scores[0])[::-1]][:1]}
+    sorted_idxs = np.argsort(scores[0])[::-1]
+    best_scores = {0:scores[0][sorted_idxs][:1]}
+    best_grasps = {0:pred_grasps_cam[0][sorted_idxs][:1]}
     world_to_cam_tf = np.array([[0,-1,0,0],
                                 [-1,0,0,0],
                                 [0,0,-1,0],
@@ -91,8 +92,8 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seg_np_path', default='')
-    parser.add_argument('--full_np_path', default='')
+    parser.add_argument('--seg_np_path', default=segmented_ply_filepath)
+    parser.add_argument('--full_np_path', default=full_ply_filepath)
     parser.add_argument('--save_dir', default='')
     parser.add_argument('--ckpt_dir', default='/home/lifelong/sms/sms/contact_graspnet/checkpoints/scene_test_2048_bs3_hor_sigma_001', help='Log dir [default: checkpoints/scene_test_2048_bs3_hor_sigma_001]')
     parser.add_argument('--pc_bounding_box_path', default=bounding_box_filepath, help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
