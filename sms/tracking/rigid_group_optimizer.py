@@ -28,6 +28,7 @@ import wandb
 from dataclasses import dataclass
 from nerfstudio.cameras.cameras import Cameras
 import copy
+from sms.tracking.transforms import SE3, SO3
 
 @dataclass
 class RigidGroupOptimizerConfig:
@@ -36,12 +37,13 @@ class RigidGroupOptimizerConfig:
     rank_loss_erode: int = 5
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
-    pose_lr: float = 0.0035
-    pose_lr_final: float = 0.0006
+    pose_lr: float = 0.004
+    pose_lr_final: float = 0.0008
     rot_lr_scaler: float = 3.0
     mask_hands: bool = False
     do_obj_optim: bool = False
     blur_kernel_size: int = 5
+    blur2_kernel_size: int = 45
     clip_grad: float = 0.8
     use_roi = True
     use_mask_loss = True
@@ -91,6 +93,9 @@ class RigidGroupOptimizer:
         k = self.config.blur_kernel_size
         s = 0.3 * ((k - 1) * 0.5 - 1) + 0.8
         self.blur = kornia.filters.GaussianBlur2d((k, k), (s, s))
+        k = self.config.blur2_kernel_size
+        s = 0.3 * ((k - 1) * 0.5 - 1) + 0.8
+        self.blur2 = kornia.filters.GaussianBlur2d((k, k), (s, s))
         self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.config.pose_lr)
         self.keyframes = []
         #hand_frames stores a list of hand vertices and faces for each keyframe, stored in the OBJECT COORDINATE FRAME
@@ -135,7 +140,7 @@ class RigidGroupOptimizer:
                 tape = wp.Tape()
                 optimizer.zero_grad()
                 with tape:
-                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, use_depth, False, False, False, use_mask=use_mask, use_roi=use_roi)
+                    loss, outputs = self.get_optim_loss(self.frame, whole_pose_adj, True, use_depth, False, False, False, use_mask=use_mask, use_roi=use_roi)
                 loss.backward()
                 tape.backward()
                 optimizer.step()
@@ -264,7 +269,7 @@ class RigidGroupOptimizer:
         return self.init_p2w[i]
     
     # @profile
-    def get_optim_loss(self, frame: Frame, part_deltas, use_depth, use_rgb, use_atap, use_hand_mask, use_mask, use_roi = False):
+    def get_optim_loss(self, frame: Frame, part_deltas, use_dino, use_depth, use_rgb, use_atap, use_hand_mask, use_mask, use_roi = False):
         """
         Returns a backpropable loss for the given frame
         """
@@ -299,27 +304,48 @@ class RigidGroupOptimizer:
             else:
                 for i in reversed(range(len(self.group_masks))):
                     camera = frame.roi_frames[i].camera
-                    outputs = self.sms_model.get_outputs(camera, tracking=True, obj_id=i, BLOCK_WIDTH=8)
+                    if not use_dino: render_rgb_only = True 
+                    else: render_rgb_only = False
+                    outputs = self.sms_model.get_outputs(camera, tracking=True, obj_id=i, BLOCK_WIDTH=8, rgb_only=render_rgb_only)
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
-                    feats_dict["real_dino"].append(frame.roi_frames[i].dino_feats)
-                    feats_dict["real_depth"].append(frame.roi_frames[i].depth)
+                    if use_depth:
+                        feats_dict["real_depth"].append(frame.roi_frames[i].depth)
                     if use_mask:
-                        feats_dict["real_mask"].append((frame.roi_frames[i].mask.to(float)).unsqueeze(-1))
+                        feats_dict["real_mask"].append((frame.roi_frames[i].mask.to(torch.float32)).unsqueeze(-1))
+                        
+                    if use_dino:
+                        dino_feats = frame.roi_frames[i].dino_feats
+                        # if use_mask:
+                        #     dino_feats[~frame.roi_frames[i].mask] = 0
+                        feats_dict["real_dino"].append(dino_feats)
+                    # if use_dino:
+                        # import pdb; pdb.set_trace()
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
-                    feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
+                    if use_dino:
+                        feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
                     # feats_dict["rendered_dino"].append(outputs['dino'])
-                    feats_dict["rendered_depth"].append(outputs['depth'])
-                    feats_dict["accumulation"].append((outputs['accumulation']).to(float))
-                    if use_mask:
-                        valids = ((outputs["accumulation"] > 0.8).squeeze(-1) & (frame.roi_frames[i].mask) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
-                    else:
-                        valids = ((outputs["accumulation"] > 0.8).squeeze(-1) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
+                    if use_depth:
+                        feats_dict["rendered_depth"].append(outputs['depth'])
+                        
+                    # accum = self.blur2(outputs['accumulation'].permute(2,0,1)[None]).squeeze(0).permute(1,2,0)
+                    accum = outputs['accumulation']
+                    feats_dict["accumulation"].append(accum.to(torch.float32))
+                    # if use_mask:
+                    #     valids = ((outputs["accumulation"] > 0.8).squeeze(-1) & (frame.roi_frames[i].mask) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
+                    # else:
+                    valids = ((outputs["accumulation"] > 0.8).squeeze(-1) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
                     feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(8,8, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
                 for key in feats_dict.keys():
-                    for i in range(len(self.group_masks)):
-                        feats_dict[key][i] = feats_dict[key][i].contiguous().view(-1, feats_dict[key][i].shape[-1])
-                    feats_dict[key] = torch.cat(feats_dict[key])
+                    # if use_dino == False:
+                        # import pdb; pdb.set_trace()
+                    if len(feats_dict[key]) > 0:
+                        for i in range(len(self.group_masks)):
+                                feats_dict[key][i] = feats_dict[key][i].contiguous().view(-1, feats_dict[key][i].shape[-1])
+                        feats_dict[key] = torch.cat(feats_dict[key])
 
+        # import pdb; pdb.set_trace()
+        # loss = torch.zeros(1, device = 'cuda:0')[0]
+        # if use_dino:
         loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
         
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
@@ -346,9 +372,9 @@ class RigidGroupOptimizer:
             mask_bce_loss = F.binary_cross_entropy(feats_dict["accumulation"], feats_dict["real_mask"])
             if self.use_wandb:
                 wandb.log({"mask_bce_loss": mask_bce_loss.mean().item()})
-            loss += mask_bce_loss
+            loss += 0.6 * mask_bce_loss
         if use_rgb:
-            rgb_loss = 0.05 * (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
+            rgb_loss = 0.75 * (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
             loss = loss + rgb_loss
             if self.use_wandb:
                 wandb.log({"rgb_loss": rgb_loss.item()})
@@ -369,7 +395,7 @@ class RigidGroupOptimizer:
             )
         ).get_scheduler(self.part_optimizer, self.config.pose_lr)
         self.prev_part_deltas = copy.deepcopy(self.part_deltas.detach())
-        for _ in range(niter):
+        for i in range(niter):
             # renormalize rotation representation
             with torch.no_grad():
                 self.part_deltas[:, 3:] = self.part_deltas[:, 3:] / self.part_deltas[:, 3:].norm(dim=1, keepdim=True)
@@ -382,14 +408,28 @@ class RigidGroupOptimizer:
                     frame = self.frame
                 else:
                     frame = self.frame.frame
-                loss, outputs = self.get_optim_loss(frame, self.part_deltas, 
+                # if i <= 2: 
+                use_dino = True
+                #     use_depth = False
+                # else: 
+                #     use_dino = False
+                #     use_depth = True
+                loss, outputs = self.get_optim_loss(frame, self.part_deltas, use_dino,
                         use_depth, use_rgb, self.config.use_atap, self.config.mask_hands, self.config.use_mask_loss, self.config.use_roi)
             if loss is not None:
                 loss.backward()
                 #tape backward needs to be after loss backward since loss backward propagates gradients to the outputs of warp kernels
                 tape.backward()
+            # import pdb; pdb.set_trace()
+            # rot = SO3(self.part_deltas.grad[:,3:])
+            # scaled_rot = SO3.exp(rot.log()*self.config.rot_lr_scaler)
+            # scale = scaled_rot.wxyz/rot.wxyz
+            # self.part_deltas.grad[:, 3:] *= scale
+            # import pdb ; pdb.set_trace()
+            
             self.part_optimizer.step()
             part_scheduler.step()
+            
             if self.use_wandb:
                 part_grad_norms = self.part_deltas.grad.norm(dim=1)
                 for i in range(len(self.group_masks)):
@@ -574,24 +614,28 @@ class RigidGroupOptimizer:
                 raise RuntimeError("Object left ROI")
             return object_mask
         
-    def calculate_roi(self, cam: Cameras, obj_id: int):
+    def calculate_roi(self, obj_id: int, cam: Cameras = None):
         """
         Calculate the ROI for the object given a certain camera pose and object index
         """
         with torch.no_grad():
-            object_mask = self.render_mask(cam, obj_id)
+            if cam is not None:
+                object_mask = self.render_mask(cam, obj_id)
+            else: 
+                object_mask = self.frame._obj_masks[obj_id].squeeze(0)
+                # import pdb; pdb.set_trace()
             valids = torch.where(object_mask)
             valid_xs = valids[1]/object_mask.shape[1]
             valid_ys = valids[0]/object_mask.shape[0] # normalize to 0-1
             # import pdb; pdb.set_trace()
-            inflate_amnt = (
-                max((self.config.roi_inflate_proportion*(valid_xs.max() - valid_xs.min()).item()), (self.config.roi_inflate/cam.width.item())),
-                max((self.config.roi_inflate_proportion*(valid_ys.max() - valid_ys.min()).item()), (self.config.roi_inflate/cam.height.item()))
-            ) # x, y
-            
-            # import pdb; pdb.set_trace()
-            # inflate_amnt = (self.config.roi_inflate/cam.width.item(), self.config.roi_inflate/cam.width.item()) # fixed num pixels rather than mask proportion
-            
+            if cam is not None:
+                inflate_amnt = (
+                    max((self.config.roi_inflate_proportion*(valid_xs.max() - valid_xs.min()).item()), (self.config.roi_inflate/cam.width.item())),
+                    max((self.config.roi_inflate_proportion*(valid_ys.max() - valid_ys.min()).item()), (self.config.roi_inflate/cam.height.item()))
+                ) # x, y
+            else:
+                inflate_amnt = ((self.config.roi_inflate_proportion*(valid_xs.max() - valid_xs.min()).item()),
+                                (self.config.roi_inflate_proportion*(valid_ys.max() - valid_ys.min()).item()))
             xmin, xmax, ymin, ymax = max(0,valid_xs.min().item() - inflate_amnt[0]), min(1,valid_xs.max().item() + inflate_amnt[0]),\
                                 max(0,valid_ys.min().item() - inflate_amnt[1]), min(1,valid_ys.max().item() + inflate_amnt[1])
             return xmin, xmax, ymin, ymax
@@ -612,7 +656,7 @@ class RigidGroupOptimizer:
         assert self.is_initialized, "Must initialize first with the first frame"
         if self.config.use_roi:
             for obj_id in range(len(self.group_masks)):
-                xmin, xmax, ymin, ymax = self.calculate_roi(frame.frame.camera, obj_id)
+                xmin, xmax, ymin, ymax = self.calculate_roi(obj_id, cam = frame.frame.camera)
                 frame.add_roi(xmin, xmax, ymin, ymax)
         self.frame = frame
         
@@ -621,12 +665,15 @@ class RigidGroupOptimizer:
                 init_sam2(self.frame, self.sms_model)
             else:
                 propogate_sam2(self.frame)
-        
-        if extrapolate_velocity and self.part_deltas.shape[0] > 1:
-            if (self.prev_part_deltas != self.part_deltas).any().item():
-                with torch.no_grad():
-                    new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.1)
-                    self.part_deltas = torch.nn.Parameter(torch.cat([new_parts], dim=0))
+                for obj_id in range(len(self.frame._roi_frames)):
+                    xmin, xmax, ymin, ymax = self.calculate_roi(obj_id)
+                    self.frame.update_roi(obj_id, xmin, xmax, ymin, ymax)
+        # self.frame = frame
+        # if extrapolate_velocity and self.part_deltas.shape[0] > 1:
+        #     if (self.prev_part_deltas != self.part_deltas).any().item():
+        #         with torch.no_grad():
+        #             new_parts = extrapolate_poses(self.prev_part_deltas, self.part_deltas.data, 0.15)
+        #             self.part_deltas = torch.nn.Parameter(torch.cat([new_parts], dim=0))
                     
-                replace_in_optim(self.part_optimizer, [self.part_deltas])
-                zero_optim_state(self.part_optimizer)
+        #         replace_in_optim(self.part_optimizer, [self.part_deltas])
+        #         zero_optim_state(self.part_optimizer)

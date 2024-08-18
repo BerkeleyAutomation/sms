@@ -173,3 +173,27 @@ class PosedObservation:
             camera.rescale_output_resolution(self.max_roi_resolution/max(camera.width.item(),camera.height.item()))
         depth = self._original_depth[ymin:ymax, xmin:xmax].clone().squeeze(-1)
         self._roi_frames.append(Frame(rgb, camera, self._dino_fn, depth, xmin, xmax, ymin, ymax))
+        
+    def update_roi(self, idx, xmin, xmax, ymin, ymax):
+        assert len(self._roi_frames) > idx
+        assert xmin < xmax and ymin < ymax
+        assert xmin >= 0 and ymin >= 0
+        assert xmax <= 1.0 and ymax <= 1.0, "xmin and ymin should be normalized"
+        # convert normalized to pixels in original image
+        xmin,xmax,ymin,ymax = int(xmin*(self._original_camera.width-1)), int(xmax*(self._original_camera.width-1)),\
+              int(ymin*(self._original_camera.height-1)), int(ymax*(self._original_camera.height-1))
+        # adjust these value to be multiples of 14, dino patch size
+        xlen = ((xmax - xmin)//14) * 14
+        ylen = ((ymax - ymin)//14) * 14
+        xmax = xmin + xlen
+        ymax = ymin + ylen
+        rgb = self._raw_rgb[ymin:ymax, xmin:xmax].clone()
+        camera = crop_camera(self._original_camera, xmin, xmax, ymin, ymax)
+        if max(camera.width.item(),camera.height.item()) > self.max_roi_resolution:
+            camera.rescale_output_resolution(self.max_roi_resolution/max(camera.width.item(),camera.height.item()))
+        depth = self._original_depth[ymin:ymax, xmin:xmax].clone().squeeze(-1)
+        # import pdb ;pdb.set_trace()
+        self._roi_frames[idx] = Frame(rgb, camera, self._dino_fn, depth, xmin, xmax, ymin, ymax)
+        if len(self._obj_masks) > 0:
+            # import pdb ;pdb.set_trace()
+            self._roi_frames[idx].obj_mask = self._obj_masks[idx].squeeze(0)[ymin:ymax, xmin:xmax].clone()

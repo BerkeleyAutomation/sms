@@ -20,6 +20,7 @@ import open3d as o3d
 import pyzed.sl as sl
 import json
 import cv2
+import traceback
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
@@ -359,8 +360,8 @@ def main(
             exit()
         except Exception as e:
             print("An exception occured: ", e)
+            traceback.print_exc()
             exit()
-
-
+            
 if __name__ == "__main__":
     tyro.cli(main)
