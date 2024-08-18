@@ -5,6 +5,13 @@ import tyro
 import time
 import json
 
+def get_bbox_from_grasp(grasp, depth=0.1016, width=0.085, height=0.004) -> o3d.geometry.OrientedBoundingBox:
+    center = grasp[:3,3]
+    rot_matrix = grasp[:3,:3]
+    extent=np.array((depth, width, height))
+    box = o3d.geometry.OrientedBoundingBox(center,rot_matrix,extent)
+    return box
+
 def create_mesh_box(width, height, depth, dx=0, dy=0, dz=0):
         ''' Author: chenxi-wang
         Create box instance with mesh representation.

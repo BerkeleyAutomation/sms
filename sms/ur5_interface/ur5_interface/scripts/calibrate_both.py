@@ -12,6 +12,7 @@ import pyzed.sl as sl
 from tqdm import tqdm
 import pdb
 import os
+from scipy.spatial.transform import Rotation as R
 import pathlib
 
 # script_directory = pathlib.Path(__file__).parent.resolve()
@@ -70,6 +71,12 @@ def rvec_tvec_to_transform(rvec, tvec,to_frame):
     t = tvec
     return RigidTransform(R, t, from_frame="tag", to_frame=to_frame)
 
+def clear_tcp(robot):
+    tool_to_wrist = RigidTransform()
+    tool_to_wrist.translation = np.array([0, 0, 0])
+    tool_to_wrist.from_frame = "tool"
+    tool_to_wrist.to_frame = "wrist"
+    robot.set_tcp(tool_to_wrist)
 
 def pose_estimation(
     frame,
@@ -120,25 +127,63 @@ def pose_estimation(
                 return frame, rvec, tvec
     return None
 
+def get_hemi_translations(
+    phi_min, phi_max, theta_min, theta_max, table_center, phi_div, theta_div, R
+):
+    sin, cos = lambda x: np.sin(np.deg2rad(x)), lambda x: np.cos(np.deg2rad(x))
+    rel_pos = np.zeros((phi_div * theta_div, 3))
+    for i, phi in enumerate(np.linspace(phi_min, phi_max, phi_div)):
+        tmp_pose = []
+        for j, theta in enumerate(np.linspace(theta_min, theta_max, theta_div)):
+            tmp_pose.append(
+                np.array(
+                    [R * sin(phi) * cos(theta), R * sin(phi) * sin(theta), R * cos(phi)]
+                )
+            )
+        if i % 2 == 1:
+            tmp_pose.reverse()
+        for k, pose in enumerate(tmp_pose):
+            rel_pos[i * theta_div + k] = pose
+
+    return rel_pos + table_center
+
+def point_at(cam_t, obstacle_t, extra_R=np.eye(3)):
+    """
+    cam_t: numpy array of 3D position of gripper
+    obstacle_t: numpy array of 3D position of location to point camera at
+    """
+    direction = obstacle_t - cam_t
+    z_axis = direction / np.linalg.norm(direction)
+    x_axis_dir = -np.cross(np.array((0, 0, 1)), z_axis)
+    if np.linalg.norm(x_axis_dir) < 1e-10:
+        x_axis_dir = np.array((0, 1, 0))
+    x_axis = x_axis_dir / np.linalg.norm(x_axis_dir)
+    y_axis_dir = np.cross(z_axis, x_axis)
+    y_axis = y_axis_dir / np.linalg.norm(y_axis_dir)
+
+    # postmultiply the extra rotation to rotate the camera WRT itself
+    R = RigidTransform.rotation_from_axes(x_axis, y_axis, z_axis)
+    return R
+
 
 def register_webcam():
     port_num = 0
     ur = UR5Robot(gripper=1)
+    clear_tcp(ur)
+
+    home_joints = np.array([0.30870315432548523, -1.2771266142474573, -1.5955479780780237, -1.754920784627096, 1.5260951519012451, 0.2983420491218567])
+    ur.move_joint(home_joints,vel=1.0,acc=0.1)
     from ur5_interface.RAFT_Stereo.raftstereo.zed_stereo import Zed
-    zed1 = Zed()
-    zed2 = Zed()
-    zed_mini_focal_length = 730 # For 1280x720
-    zed_mini = None
-    extrinsic_zed = None
-    save_joints = False
-    saved_joints = []
     
-    if(abs(zed1.f_ - zed_mini_focal_length) < abs(zed2.f_ - zed_mini_focal_length)):
-        zed_mini = zed1
-        extrinsic_zed = zed2
-    else:
-        zed_mini = zed2
-        extrinsic_zed = zed1
+    wrist_zed_id = 16347230
+    extrinsic_zed_id = 22008760
+    
+    zed_mini = Zed(wrist_zed_id)
+    extrinsic_zed = Zed(extrinsic_zed_id, is_res_1080=True)
+
+    teach_mode = False
+    saved_joints = []
+
     H_WRIST = RigidTransform(translation=[0, 0, 0]).as_frames("rob", "rob")
     ur.set_tcp(H_WRIST)
     H_chess_cams = []
@@ -154,20 +199,32 @@ def register_webcam():
     trajectory_path = pathlib.Path(calibration_save_path + "/calibrate_extrinsics_trajectory.npy")
     traj = None
     automatic_path = False
-    if trajectory_path.exists() and not save_joints:
+    if trajectory_path.exists() and not teach_mode:
         traj = np.load(trajectory_path)
         automatic_path = True
     else:
-        traj = _generate_hemi(
-            0.5,
-            2,
-            5,
-            (np.deg2rad(-90), np.deg2rad(90)),
-            (np.deg2rad(0), np.deg2rad(20)),
-            center,
-            center,
-            False,
-        )
+        num_poses = input("How many poses do you want to save?")
+        num_poses = int(num_poses)
+        traj = [0] * num_poses
+    # angle range from top of sphere
+    # phi_min, phi_max = 65, 20
+    # theta_min, theta_max = 110, -110
+    # phi_div, theta_div = 3, 10
+    # table_center = np.array([0.48666, -0.0104, -0.170])
+    # radius = 0.3
+    # translations = get_hemi_translations(
+    #     phi_min, phi_max, theta_min, theta_max, table_center, phi_div, theta_div, radius
+    # )
+    # rotations = [point_at(translation, table_center) for translation in translations]
+    # dummy_cam_to_wrist = RigidTransform(rotation=np.array([[-1,0,0],
+    #                                                        [0,-1,0],
+    #                                                        [0,0,1]]),translation=np.array([0,-0.1365,-0.0137]),from_frame='wrist',to_frame='cam')
+    # poses = [
+    #     RigidTransform(rotations[i], translations[i], from_frame="cam")
+    #     * dummy_cam_to_wrist
+    #     for i in range(len(translations))
+    # ]
+    # for i, pose in enumerate(tqdm(poses)):
     for p in tqdm(traj):
         if not automatic_path:
             ur.start_teach()  
@@ -191,50 +248,66 @@ def register_webcam():
         # )
         d = np.array([0.0, 0, 0, 0, 0])
         # tag dimensions
-        l = 0.105  # 0.1558
+        l = 0.170  # 0.1558
 
         out_zed_mini = None
         out_zed_extrinsic = None
-        # cv2.imwrite("img.png", img)
-        while out_zed_mini is None or out_zed_extrinsic is None:
-            out_zed_mini = pose_estimation(img_zed_mini, cv2.aruco.DICT_ARUCO_ORIGINAL, k_zed_mini, d, l, True)
-            out_zed_extrinsic = pose_estimation(img_zed_extrinsic, cv2.aruco.DICT_ARUCO_ORIGINAL, k_zed_extrinsic, d, l, True)
-            if out_zed_mini is None or out_zed_extrinsic is None:
-                input("Enter to take picture")
-                img_zed_mini = zed_mini.get_frame()[0]
-                img_zed_mini = img_zed_mini.detach().cpu().numpy()
-                
-                img_zed_extrinsic = extrinsic_zed.get_frame()[0]
-                img_zed_extrinsic = img_zed_extrinsic.detach().cpu().numpy()
-                H_rob_world = ur.get_pose()
-                
-                k_zed_mini = zed_mini.get_K()
-                k_zed_extrinsic = extrinsic_zed.get_K()
-                # k = np.array(
-                # [[1129.551243094171, 0., 966.9812584534886],
-                # [0., 1124.5757372398643, 556.5882496966005],
-                # [0., 0., 1.]]
-                # )
-                d = np.array([0.0, 0, 0, 0, 0])
-                # tag dimensions
-                l = 0.105  # 0.1558
-
-        output_zed_mini, rvec_zed_mini, tvec_zed_mini = out_zed_mini
-        output_zed_extrinsic, rvec_zed_extrinsic, tvec_zed_extrinsic = out_zed_extrinsic
-        
-        zed_mini_to_aruco = rvec_tvec_to_transform(rvec_zed_mini, tvec_zed_mini,to_frame="zed_mini")
-        zed_extrinsic_to_aruco = rvec_tvec_to_transform(rvec_zed_extrinsic,tvec_zed_extrinsic,to_frame="zed_extrinsic")
-        print("zed_mini_to_aruco", zed_mini_to_aruco)
-        print("zed_extrinsic_to_aruco", zed_extrinsic_to_aruco)
-        world_to_wrist = H_rob_world.as_frames("wrist","world")
-        world_to_wrists.append(world_to_wrist)
-        zed_mini_to_arucos.append(zed_mini_to_aruco)
-        zed_extrinsic_to_arucos.append(zed_extrinsic_to_aruco)
-        H_chess_cams.append(zed_mini_to_aruco.as_frames("cb", "cam"))
-        H_rob_worlds.append(H_rob_world.as_frames("rob", "world"))
-        if(save_joints):
-            saved_joints.append(ur.get_joints())
-    if(save_joints):
+        if automatic_path:
+            out_zed_mini = pose_estimation(img_zed_mini, cv2.aruco.DICT_6X6_50, k_zed_mini, d, l, True)
+            out_zed_extrinsic = pose_estimation(img_zed_extrinsic, cv2.aruco.DICT_6X6_50, k_zed_extrinsic, d, l, False)
+            if(out_zed_mini is not None):
+                output_zed_mini, rvec_zed_mini, tvec_zed_mini = out_zed_mini
+                zed_mini_to_aruco = rvec_tvec_to_transform(rvec_zed_mini, tvec_zed_mini,to_frame="zed_mini")
+                world_to_wrist = H_rob_world.as_frames("wrist","world")
+                world_to_wrists.append(world_to_wrist)
+                zed_mini_to_arucos.append(zed_mini_to_aruco)
+                H_chess_cams.append(zed_mini_to_aruco.as_frames("cb", "cam"))
+                H_rob_worlds.append(H_rob_world.as_frames("rob", "world"))
+            
+            if(out_zed_extrinsic is not None):
+                output_zed_extrinsic, rvec_zed_extrinsic, tvec_zed_extrinsic = out_zed_extrinsic
+                zed_extrinsic_to_aruco = rvec_tvec_to_transform(rvec_zed_extrinsic,tvec_zed_extrinsic,to_frame="zed_extrinsic")
+                zed_extrinsic_to_arucos.append(zed_extrinsic_to_aruco)
+        else:
+            while out_zed_mini is None:
+                out_zed_mini = pose_estimation(img_zed_mini, cv2.aruco.DICT_6X6_50, k_zed_mini, d, l, True)
+                out_zed_extrinsic = pose_estimation(img_zed_extrinsic, cv2.aruco.DICT_6X6_50, k_zed_extrinsic, d, l, False)
+                if out_zed_mini is None:
+                    input("Enter to take picture")
+                    img_zed_mini = zed_mini.get_frame()[0]
+                    img_zed_mini = img_zed_mini.detach().cpu().numpy()
+                    
+                    img_zed_extrinsic = extrinsic_zed.get_frame()[0]
+                    img_zed_extrinsic = img_zed_extrinsic.detach().cpu().numpy()
+                    H_rob_world = ur.get_pose()
+                    print("Robot joints: " + str(ur.get_joints()))
+                    k_zed_mini = zed_mini.get_K()
+                    k_zed_extrinsic = extrinsic_zed.get_K()
+                    # k = np.array(
+                    # [[1129.551243094171, 0., 966.9812584534886],
+                    # [0., 1124.5757372398643, 556.5882496966005],
+                    # [0., 0., 1.]]
+                    # )
+                    d = np.array([0.0, 0, 0, 0, 0])
+                    # tag dimensions
+                    l = 0.170  # 0.1558
+                    
+            if(out_zed_mini is not None):
+                output_zed_mini, rvec_zed_mini, tvec_zed_mini = out_zed_mini
+                zed_mini_to_aruco = rvec_tvec_to_transform(rvec_zed_mini, tvec_zed_mini,to_frame="zed_mini")
+                world_to_wrist = H_rob_world.as_frames("wrist","world")
+                world_to_wrists.append(world_to_wrist)
+                zed_mini_to_arucos.append(zed_mini_to_aruco)
+                H_chess_cams.append(zed_mini_to_aruco.as_frames("cb", "cam"))
+                H_rob_worlds.append(H_rob_world.as_frames("rob", "world"))
+                saved_joints.append(ur.get_joints())
+            
+            if(out_zed_extrinsic is not None):
+                output_zed_extrinsic, rvec_zed_extrinsic, tvec_zed_extrinsic = out_zed_extrinsic
+                zed_extrinsic_to_aruco = rvec_tvec_to_transform(rvec_zed_extrinsic,tvec_zed_extrinsic,to_frame="zed_extrinsic")
+                zed_extrinsic_to_arucos.append(zed_extrinsic_to_aruco)
+            
+    if(teach_mode):
         np.save(calibration_save_path + "/calibrate_extrinsics_trajectory.npy",np.array(saved_joints))
       
     H_cam_rob, H_chess_world = estimate_cam2rob(H_chess_cams, H_rob_worlds)
@@ -249,8 +322,17 @@ def register_webcam():
         H_cam_rob.to_frame = 'wrist'
         H_cam_rob.from_frame = 'zed_mini'
         H_cam_rob.save(calibration_save_path + "/wrist_to_zed_mini.tf")
-        
-    for(world_to_wrist,zed_mini_to_aruco,zed_extrinsic_to_aruco) in zip(world_to_wrists,zed_mini_to_arucos,zed_extrinsic_to_arucos):  
+ 
+    zed_extrinsic_to_aruco_translations = []
+    zed_extrinsic_to_aruco_eulers = []
+    for zed_extrinsic_to_aruco in zed_extrinsic_to_arucos:
+        zed_extrinsic_to_aruco_translations.append(zed_extrinsic_to_aruco.translation)
+        zed_extrinsic_to_aruco_eulers.append(R.from_matrix(zed_extrinsic_to_arucos[0].rotation).as_euler("xyz"))
+    mean_zed_extrinsic_to_aruco_translation = np.mean(zed_extrinsic_to_aruco_translations,axis=0)
+    mean_zed_extrinsic_to_aruco_euler = np.mean(zed_extrinsic_to_aruco_eulers,axis=0)
+    mean_zed_extrinsic_to_aruco_rotation = R.from_euler("xyz",mean_zed_extrinsic_to_aruco_euler).as_matrix()
+    zed_extrinsic_to_aruco = RigidTransform(rotation=mean_zed_extrinsic_to_aruco_rotation,translation=mean_zed_extrinsic_to_aruco_translation,from_frame="tag",to_frame='zed_extrinsic')
+    for(world_to_wrist,zed_mini_to_aruco) in zip(world_to_wrists,zed_mini_to_arucos):  
         world_to_zed_extrinsic = world_to_wrist * wrist_to_zed_mini * zed_mini_to_aruco * zed_extrinsic_to_aruco.inverse()
         world_to_zed_extrinsic_rvec,_ = cv2.Rodrigues(world_to_zed_extrinsic.rotation)
         world_to_zed_extrinsic_tvec = world_to_zed_extrinsic.translation

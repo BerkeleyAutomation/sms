@@ -473,6 +473,8 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         * wrist_to_cam.inverse()
         for i in range(len(translations))
     ]
+    import pdb
+    pdb.set_trace()
     start_pose = robot.get_pose()
     start_pose.from_frame='cam'
     poses.insert(0,start_pose)

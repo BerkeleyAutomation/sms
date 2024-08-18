@@ -4,3 +4,6 @@
 [submodule "sms/contact_graspnet"]
 	path = sms/contact_graspnet
 	url = https://github.com/NVlabs/contact_graspnet.git
+[submodule "sms/data/utils/segment-anything-2-real-time"]
+	path = sms/data/utils/segment-anything-2-real-time
+	url = https://github.com/Gy920/segment-anything-2-real-time

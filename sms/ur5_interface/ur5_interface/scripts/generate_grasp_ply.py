@@ -29,13 +29,14 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     print(str(global_config))
     print('pid: %s'%(str(os.getpid())))
 
-    pred_grasps_cam, scores, pc_full, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
+    pred_grasps_cam, scores, contact_pts, pc_full, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
                 K=K, local_regions=local_regions, filter_grasps=filter_grasps, segmap_id=segmap_id, 
                 forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=True)
-
+    
     sorted_idxs = np.argsort(scores[0])[::-1]
     best_scores = {0:scores[0][sorted_idxs][:1]}
     best_grasps = {0:pred_grasps_cam[0][sorted_idxs][:1]}
+    best_contact_pts = {0:contact_pts[0][sorted_idxs][:1]}
     world_to_cam_tf = np.array([[0,-1,0,0],
                                 [-1,0,0,0],
                                 [0,0,-1,0],
@@ -88,6 +89,8 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     pred_grasps_world = np.array(pred_grasps_world)
     np.save(f'{FLAGS.save_dir}/pred_grasps_world.npy', pred_grasps_world)
     np.save(f'{FLAGS.save_dir}/scores.npy', scores[0])
+    np.save(f'{FLAGS.save_dir}/contact_pts.npy', contact_pts[0])
+    
     return pred_grasps_world, scores[0]
 
 if __name__ == "__main__":
@@ -106,6 +109,5 @@ if __name__ == "__main__":
     parser.add_argument('--segmap_id', type=int, default=0,  help='Only return grasps of the given object id')
     parser.add_argument('--arg_configs', nargs="*", type=str, default=[], help='overwrite config parameters')
     FLAGS = parser.parse_args()
-    # seg_np_path, full_np_path, pc_bounding_box_path = sys.argv[1]
     generate_grasps(FLAGS.seg_np_path, FLAGS.full_np_path, FLAGS.pc_bounding_box_path, FLAGS.ckpt_dir, FLAGS.z_range, FLAGS.K, FLAGS.local_regions, 
                     FLAGS.filter_grasps, FLAGS.skip_border_objects, FLAGS.forward_passes, FLAGS.segmap_id, FLAGS.arg_configs, FLAGS.save_dir)
