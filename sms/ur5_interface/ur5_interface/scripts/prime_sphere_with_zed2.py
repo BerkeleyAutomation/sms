@@ -6,7 +6,7 @@ import os
 from ur5py.ur5 import UR5Robot
 from raftstereo.zed_stereo import Zed
 from autolab_core import RigidTransform, DepthImage, CameraIntrinsics, PointCloud, RgbCloud
-from convert_poses_to_json import save_poses
+from convert_poses_to_json import save_poses,save_poses_with_diff_cameras
 import open3d as o3d
 from tqdm import tqdm
 import viser
@@ -358,12 +358,12 @@ def convert_pointcloud_to_image(points,rgbs,K,image_width,image_height):
 def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     debug = False
     save_dirs = set_up_dirs(scene_name)
-    use_robot, use_cam = True, True
+    use_robot, use_cam,use_2_cams = True, True,False
+    save_nerfstudio_intrinsics_per_frame_list = []
     if use_robot:
         robot = UR5Robot(gripper=1)
         clear_tcp(robot)
-
-        home_joints = np.array([0.30870315432548523, -1.2771266142474573, -1.5955479780780237, -1.754920784627096, 1.5260951519012451, 0.2983420491218567])
+        home_joints = np.array([0.30231931805610657, -1.272318188344137, -2.0330384413348597, -1.3219192663775843, 1.527270793914795, 0.29308658838272095])
         robot.move_joint(home_joints,vel=1.0,acc=0.1)
         world_to_wrist = robot.get_pose()
         world_to_wrist.from_frame = "wrist"
@@ -379,74 +379,65 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         #robot.move_joint(home_joints)
         robot.gripper.open()
     if use_cam:    
-        zed1 = Zed()
-        zed2 = Zed()
-        zed_mini_focal_length = 730 # For 1280x720
-        cam = None
-        extrinsic_zed = None
         save_joints = False
         saved_joints = []
         
-        if(abs(zed1.f_ - zed_mini_focal_length) < abs(zed2.f_ - zed_mini_focal_length)):
-            cam = zed1
-            extrinsic_zed = zed2
-        else:
-            cam = zed2
-            extrinsic_zed = zed1
-        # cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 10)
-        # cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 60)
-        # print("Zed mini Exposure is set to: ",
-        #     cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
-        # )
-        # print("Zed mini Gain is set to: ",
-        #     cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
-        # )
-        # extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 10)
-        # extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 65)
-        # print("Extrinsic Zed Exposure is set to: ",
-        #     extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
-        # )
-        # print("Extrinsic Zed Gain is set to: ",
-        #     extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
-        # )
+        wrist_zed_id = 16347230
+        extrinsic_zed_id = 22008760
+    
+        cam = Zed(wrist_zed_id)
+        extrinsic_zed = None
+        if use_2_cams:
+            extrinsic_zed = Zed(extrinsic_zed_id, is_res_1080=True)
+        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 17)
+        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 38)
+        time.sleep(1.0)
+        print("Zed mini Exposure is set to: ",
+            cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
+        )
+        print("Zed mini Gain is set to: ",
+            cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+        )
+        print("Zed mini fps set to: ",
+              cam.cam.get_camera_information().camera_configuration.fps)
     global_pointcloud = None
     global_rgbcloud = None
-    img_l,img_r = extrinsic_zed.get_rgb()
-    depth,points,rgbs  = extrinsic_zed.get_depth_image_and_pointcloud(img_l,img_r,from_frame="zed_extrinsic")
-    K = np.array([[cam.f_,0,cam.cx_,0],[0,cam.f_,cam.cy_,0],[0,0,1,0]])
-    image_width,image_height = cam.width_,cam.height_
-    
-    image_inpainted,depth_inpainted = convert_pointcloud_to_image(points,rgbs,K,image_width,image_height)
-   
-    points_world_frame = world_to_extrinsic_zed.apply(points)
-    global_pointcloud = points_world_frame.data.T
-    global_rgbcloud = rgbs.data.T
-    if debug:
-        debug_server = viser.ViserServer()
-        debug_server.add_point_cloud('extrinsic_pc',points=global_pointcloud,colors=global_rgbcloud,point_size=0.001)
-        img_l,img_r = cam.get_rgb()
-        wrist_pose = robot.get_pose()
-        wrist_pose.from_frame = 'wrist'
-        # print(pose)
-        print(wrist_pose)
-        cam_pose = wrist_pose * wrist_to_cam
-        depth,points,rgbs  = cam.get_depth_image_and_pointcloud(img_l,img_r,from_frame="cam")
-            
-        points_world_frame = cam_pose.apply(points)
-        debug_server.add_point_cloud('top_down_pc',points=points_world_frame.data.T,colors=rgbs.data.T,point_size=0.001)
-    
-    world_to_extrinsic_zed_image_frame = world_to_extrinsic_zed.matrix @ nerf_frame_to_image_frame
-    world_to_extrinsic_zed_image_rigid_tf = RigidTransform(rotation=world_to_extrinsic_zed_image_frame[:3,:3],translation=world_to_extrinsic_zed_image_frame[:3,3],from_frame="zed_extrinsic",to_frame="world")
-    np.savetxt(os.path.join(save_dirs["poses"], "000.txt"), world_to_extrinsic_zed_image_rigid_tf.matrix)
-    save_imgs(
-                    image_inpainted,
-                    image_inpainted,
-                    depth_inpainted,
-                    0,
-                    save_dirs,
-                    flip_table=flip_table,
-                ) 
-
+    if(extrinsic_zed is not None):
+        
+        img_l,img_r = extrinsic_zed.get_rgb()
+        depth,points,rgbs  = extrinsic_zed.get_depth_image_and_pointcloud(img_l,img_r,from_frame="zed_extrinsic")
+        K = np.array([[cam.f_,0,cam.cx_,0],[0,cam.f_,cam.cy_,0],[0,0,1,0]])
+        image_width,image_height = cam.width_,cam.height_
+        
+        points_world_frame = world_to_extrinsic_zed.apply(points)
+        global_pointcloud = points_world_frame.data.T
+        global_rgbcloud = rgbs.data.T
+        if debug:
+            debug_server = viser.ViserServer()
+            debug_server.add_point_cloud('extrinsic_pc',points=global_pointcloud,colors=global_rgbcloud,point_size=0.001)
+            img_l,img_r = cam.get_rgb()
+            wrist_pose = robot.get_pose()
+            wrist_pose.from_frame = 'wrist'
+            # print(pose)
+            print(wrist_pose)
+            cam_pose = wrist_pose * wrist_to_cam
+            depth,points,rgbs  = cam.get_depth_image_and_pointcloud(img_l,img_r,from_frame="cam")
+                
+            points_world_frame = cam_pose.apply(points)
+            debug_server.add_point_cloud('top_down_pc',points=points_world_frame.data.T,colors=rgbs.data.T,point_size=0.001)
+        
+        world_to_extrinsic_zed_image_frame = world_to_extrinsic_zed.matrix @ nerf_frame_to_image_frame
+        world_to_extrinsic_zed_image_rigid_tf = RigidTransform(rotation=world_to_extrinsic_zed_image_frame[:3,:3],translation=world_to_extrinsic_zed_image_frame[:3,3],from_frame="zed_extrinsic",to_frame="world")
+        np.savetxt(os.path.join(save_dirs["poses"], "000.txt"), world_to_extrinsic_zed_image_rigid_tf.matrix)
+        save_imgs(
+                        img_l,
+                        img_r,
+                        depth,
+                        0,
+                        save_dirs,
+                        flip_table=flip_table,
+                    ) 
+        save_nerfstudio_intrinsics_per_frame_list.append(extrinsic_zed.get_ns_intrinsics())
     # pdb.set_trace()
     tool_to_wrist = RigidTransform()
     # need to set to zero so the frame is at the wrist joint
@@ -473,8 +464,6 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         * wrist_to_cam.inverse()
         for i in range(len(translations))
     ]
-    import pdb
-    pdb.set_trace()
     start_pose = robot.get_pose()
     start_pose.from_frame='cam'
     poses.insert(0,start_pose)
@@ -534,12 +523,6 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
             time.sleep(0.05)
     
     # First image comes from Zed 2
-    # i = 1
-    
-    if use_cam:
-        camera_intr = cam.get_intr()
-        camera_intr.save(f"{HOME_DIR}/{scene_name}/zed.intr")
-        save_poses(save_dirs["poses"], cam.get_ns_intrinsics(), wrist_to_cam)
     i = 1
     for (left_image,right_image,world_to_image) in zip(left_images,right_images,world_to_images):
         depth,points,rgbs  = cam.get_depth_image_and_pointcloud(left_image,right_image,from_frame="image_frame_"+str(i))
@@ -563,9 +546,13 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
                     save_dirs,
                     flip_table=flip_table,
                 ) 
+        save_nerfstudio_intrinsics_per_frame_list.append(cam.get_ns_intrinsics())
         print("Made depth image " + str(i) + "/" + str(len(left_images)))
         i += 1
-    
+    if use_cam:
+        camera_intr = cam.get_intr()
+        camera_intr.save(f"{HOME_DIR}/{scene_name}/zed.intr")
+        save_poses_with_diff_cameras(save_dirs["poses"],save_nerfstudio_intrinsics_per_frame_list,single_cam = (extrinsic_zed == None))
     close_pointcloud = global_pointcloud[(global_pointcloud[:, 0] >= x_min_world) & (global_pointcloud[:, 0] <= x_max_world) &
         (global_pointcloud[:, 1] >= y_min_world) & (global_pointcloud[:, 1] <= y_max_world) &
         (global_pointcloud[:, 2] >= z_min_world) & (global_pointcloud[:, 2] <= z_max_world)
@@ -595,6 +582,8 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     final_rgbcloud = full_subsampled_rgbcloud[final_indices]
     server = viser.ViserServer()
     server.add_point_cloud(name="full_pointcloud",points=final_pointcloud,colors=final_rgbcloud,point_size=0.001)
+    
+    
     # db = DBSCAN(eps=0.005, min_samples=20) #
     # labels = db.fit_predict(subsampled_pointcloud)
     # subsampled_pointcloud = subsampled_pointcloud[labels != -1]
@@ -643,7 +632,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     # robot.move_joint(collection_finish_joints)
 
     robot.kill()
-    input("Kill Pointcloud?")
+    input("Kill pointcloud?")
     return 1
 
 

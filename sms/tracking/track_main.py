@@ -33,7 +33,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/0808_drill_battery_nofeatup/sms-data/2024-08-09_113806/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240819_drill_solo2/sms-data/2024-08-20_040528/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -62,7 +62,8 @@ def main(
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
     zed = Zed(cam_id=extrinsic_zed_id,is_res_1080=True) # Initialize ZED
-    
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 17)
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 38)
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
     home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
@@ -135,20 +136,36 @@ def main(
     def _(_):
         # TODO: Query for most relevant object
         text_positives = text_handle.value
-        
-        clip_encoder.set_positives(text_positives.split(";"))
-        if len(clip_encoder.positives) > 0:
-            relevancy = opt.get_clip_relevancy(clip_encoder)
-            group_masks = opt.optimizer.group_masks
+        queries = text_positives.split(";")
+        if len(queries) <= 0:
+            print("Enter something in the text box and if you want multiple words, separate with ;")
+        object_query = queries[0]
+        clip_encoder.set_positives(object_query)
+        relevancy = opt.get_clip_relevancy(clip_encoder)
+        group_masks = opt.optimizer.group_masks
 
-            relevancy_avg = []
-            for mask in group_masks:
-                relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
-            relevancy_avg = torch.tensor(relevancy_avg)
-            opt.max_relevancy_label = torch.argmax(relevancy_avg).item()
-            opt.max_relevancy_text = text_positives
+        relevancy_avg = []
+        for mask in group_masks:
+            relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
+        relevancy_avg = torch.tensor(relevancy_avg)
+        opt.max_relevancy_label = torch.argmax(relevancy_avg).item()
+        opt.max_relevancy_text = text_positives
+        generate_grasps_handle.disabled = False
+        execute_grasp_handle.disabled = False
+        if len(queries) == 2: # Object and part query
+            part_query = queries[1]
+            max_mask_label = opt.max_relevancy_label
+            clip_encoder.set_positives(part_query)
+            relevancy = opt.get_clip_relevancy(clip_encoder)
+            part_relevancies = relevancy[:,0:1][group_masks[max_mask_label]]
+            dino_features_for_object = opt.pipeline.model.gauss_params['dino_feats'][group_masks[max_mask_label]]
+            part_relevancies_filename = str(opt.config_path.parent.joinpath("part_relevancies.npy"))
+            dino_features_for_object_filename = str(opt.config_path.parent.joinpath("dino_features_for_object.npy"))
+            np.save(part_relevancies_filename,part_relevancies.detach().cpu().numpy())
+            np.save(dino_features_for_object_filename,dino_features_for_object.detach().cpu().numpy())
             generate_grasps_handle.disabled = False
             execute_grasp_handle.disabled = False
+            # Part Oriented Grasping here
         else:
             print("No language query provided")
     

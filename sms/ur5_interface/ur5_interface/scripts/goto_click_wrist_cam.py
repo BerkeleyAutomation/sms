@@ -106,15 +106,8 @@ def main():
 
     # mirror_ref = sl.Transform()
     # mirror_ref.set_translation(sl.Translation(2.75, 4.0, 0))
-
-    zed = Zed()
-    zed_focal_length = 730 # For 1280x720
-    if(abs(zed.f_ - zed_focal_length) > 10):
-        print("Trying other Zed camera")
-        zed = Zed()
-        if(abs(zed.f_ - zed_focal_length) > 10):
-            print("Please make sure Zed2 is plugged in")
-            exit()
+    wrist_zed_id = 16347230
+    zed = Zed(wrist_zed_id)
     calibration_params = zed.cam.get_camera_information().camera_configuration.calibration_parameters
 
     f_x = calibration_params.left_cam.fx

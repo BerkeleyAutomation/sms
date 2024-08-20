@@ -19,13 +19,13 @@ class Zed:
             init.depth_mode = sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1
-            init.camera_fps = 30
+            init.camera_fps = 15
         elif is_res_1080:
             init.camera_image_flip = sl.FLIP_MODE.OFF
             init.depth_mode=sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1
-            init.camera_fps = 30
+            init.camera_fps = 15
             init.depth_minimum_distance = 100  # millimeters
             self.width_ = 1920
             self.height_ = 1080
@@ -34,12 +34,11 @@ class Zed:
             self.height_ = 720
             self.width_ = 1280
             init.sdk_verbose = 1
-            init.camera_fps = 30
+            init.camera_fps = 15
             # flip camera
             init.camera_image_flip = sl.FLIP_MODE.OFF
             init.depth_mode = sl.DEPTH_MODE.NONE
             init.depth_minimum_distance = 100  # millimeters
-            
         self.init_res = 1920 if init.camera_resolution == sl.RESOLUTION.HD1080 else 1280
         self.cam = sl.Camera()
         init.camera_disable_self_calib = True
@@ -56,12 +55,6 @@ class Zed:
             exit()
         else:
             print("Opened camera")
-            print("Current Exposure is set to: ",
-                self.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
-            )
-            print("Current Gain is set to: ",
-                self.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
-            )
         left_cx = self.get_K(cam="left")[0, 2]
         right_cx = self.get_K(cam="right")[0, 2]
         self.cx_diff = right_cx - left_cx  # /1920
@@ -226,8 +219,8 @@ class Zed:
         return {
             # "w": self.cam.get_camera_information().camera_resolution.width,
             # "h": self.cam.get_camera_information().camera_resolution.height,
-            "w": 1280,
-            "h": 720,
+            "w": self.width_,
+            "h": self.height_,
             "fl_x": calibration_parameters_l.fx,
             "fl_y": calibration_parameters_l.fy,
             "cx": calibration_parameters_l.cx,
@@ -263,19 +256,16 @@ class Zed:
                 init.depth_mode = sl.DEPTH_MODE.NONE
                 init.camera_resolution = sl.RESOLUTION.HD1080
                 init.sdk_verbose = 1
-                init.camera_fps = 30
+                init.camera_fps = 15
             else:
                 init.camera_resolution = sl.RESOLUTION.HD720  # sl.RESOLUTION.HD1080
                 init.sdk_verbose = 1
-                init.camera_fps = 30
+                init.camera_fps = 15
                 # flip camera
                 init.camera_image_flip = sl.FLIP_MODE.OFF
                 init.depth_mode = sl.DEPTH_MODE.NONE
                 init.depth_minimum_distance = 100  # millimeters
             self.cam = sl.Camera()
-            # manually sets exposure
-            self.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 30)
-            self.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 60)
             init.camera_disable_self_calib = True
             status = self.cam.open(init)
             if self.recording_file is not None:

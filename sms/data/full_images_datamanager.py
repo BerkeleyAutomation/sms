@@ -71,7 +71,7 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """Whether to cache images in memory. If "numpy", caches as numpy arrays, if "torch", caches as torch tensors."""
     patch_tile_size_range: Tuple[int, int] = (0.05, 0.5)
     """The range of tile sizes to sample from for patch-based training"""
-    patch_tile_size_res: int = 7
+    patch_tile_size_res: int = 10
     """The number of tile sizes to sample from for patch-based training"""
     patch_stride_scaler: float = 0.5
     """The stride scaler for patch-based training"""
@@ -87,7 +87,7 @@ class FullImageDatamanagerConfig(DataManagerConfig):
     """The step at which to begin supervising clip and groups"""
     dino_step: int = 2000
     """The step at which to begin supervising dino"""
-    # use_featup: bool = False    
+    use_featup: bool = False    
 
 
 class FullImageDatamanager(DataManager, Generic[TDataset]):
@@ -468,8 +468,7 @@ class FullImageDatamanager(DataManager, Generic[TDataset]):
             
             # Masks out the background from RGB training, which is always the last detic_mask for the image
             # data["mask"] = ~detic_masks[-1].squeeze(0).unsqueeze(-1)
-            
-            self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
+            self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.9)]
 
             x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
             y = torch.arange(0, scaled_height*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1)

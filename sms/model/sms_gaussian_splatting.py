@@ -1128,7 +1128,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         n_phrases = len(self.image_encoder.positives)
         n_phrases_maxs = [None for _ in range(n_phrases)]
         n_phrases_sims = [None for _ in range(n_phrases)]
-        scales_list = torch.linspace(0.0, 1.5, 30).to(self.device)
+        scales_list = torch.linspace(0.0, 0.5, 30).to(self.device)
         # scales_list = [0.1]
         all_probs = []
         BLOCK_WIDTH = 16

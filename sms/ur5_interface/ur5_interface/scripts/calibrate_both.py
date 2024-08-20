@@ -253,7 +253,8 @@ def register_webcam():
         out_zed_mini = None
         out_zed_extrinsic = None
         if automatic_path:
-            out_zed_mini = pose_estimation(img_zed_mini, cv2.aruco.DICT_6X6_50, k_zed_mini, d, l, True)
+            visualize_zed_mini = teach_mode
+            out_zed_mini = pose_estimation(img_zed_mini, cv2.aruco.DICT_6X6_50, k_zed_mini, d, l, visualize_zed_mini)
             out_zed_extrinsic = pose_estimation(img_zed_extrinsic, cv2.aruco.DICT_6X6_50, k_zed_extrinsic, d, l, False)
             if(out_zed_mini is not None):
                 output_zed_mini, rvec_zed_mini, tvec_zed_mini = out_zed_mini

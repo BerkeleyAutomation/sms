@@ -184,7 +184,7 @@ class Zed():
             init.depth_mode=sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1
-            init.camera_fps = 30
+            init.camera_fps = 15
             self.width = 1920
             self.height = 1080
         elif is_res_1080:
@@ -192,13 +192,13 @@ class Zed():
             init.depth_mode=sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1
-            init.camera_fps = 30
+            init.camera_fps = 15
             self.width = 1920
             self.height = 1080
         else:
             init.camera_resolution = sl.RESOLUTION.HD720
             init.sdk_verbose = 1
-            init.camera_fps = 30
+            init.camera_fps = 15
             # flip camera
             # init.camera_image_flip = sl.FLIP_MODE.ON
             init.depth_mode=sl.DEPTH_MODE.NONE

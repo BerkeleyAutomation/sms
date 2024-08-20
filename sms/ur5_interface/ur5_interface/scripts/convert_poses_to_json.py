@@ -38,6 +38,7 @@ def save_json(data, filename):
     with open(filename, 'w') as file:
         json.dump(data, file, indent=4)
 
+# Andrew's bad naming convention for cam_to_wrist, Kush thinks it's wrist_to_cam
 def save_poses(poses_dir, intrinsics_dict, cam_to_wrist):
     extrinsics_dicts = []
     print(os.listdir(poses_dir))
@@ -57,3 +58,23 @@ def save_poses(poses_dir, intrinsics_dict, cam_to_wrist):
     intrinsics_dict["frames"] = extrinsics_dicts
     intrinsics_dict["ply_file_path"] = "sparse_pc.ply"
     save_json(intrinsics_dict, os.path.join(poses_dir, "..", "transforms.json"))
+    
+def save_poses_with_diff_cameras(poses_dir,intrinsics_dict_list,single_cam = False):
+    extrinsics_dicts = []
+    print(os.listdir(poses_dir))
+    num_files = len(os.listdir(poses_dir))
+    assert num_files == len(intrinsics_dict_list), "Make sure you save an intrinsics dictionary for each image frame"
+    print(num_files)
+    for i in range(num_files):    
+        frame_dict = intrinsics_dict_list[i]
+        if single_cam:
+            i += 1
+        transform_mat = np.loadtxt(os.path.join(poses_dir, f"{i:03d}.txt")) 
+        frame_dict['file_path']=os.path.join(img_dir, f"frame_{i+1:05d}.png")
+        frame_dict['depth_file_path']=os.path.join(depth_dir,f"frame_{i+1:05d}.npy")
+        frame_dict['transform_matrix']=transform_mat.tolist()
+        extrinsics_dicts.append(frame_dict)
+    final_dict = {}
+    final_dict['frames'] = extrinsics_dicts
+    final_dict["ply_file_path"] = "sparse_pc.ply"
+    save_json(final_dict, os.path.join(poses_dir, "..", "transforms.json"))

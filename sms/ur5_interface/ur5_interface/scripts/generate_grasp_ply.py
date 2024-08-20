@@ -43,7 +43,7 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
                                 [0,0,0,1]])
 
 
-    visualize_grasps(pc_full, best_grasps, best_scores, plot_opencv_cam=True, pc_colors=pc_colors)
+    #visualize_grasps(pc_full, best_grasps, best_scores, plot_opencv_cam=True, pc_colors=pc_colors)
     # Create an Open3D point cloud object
     point_cloud_cam = o3d.geometry.PointCloud()
 
