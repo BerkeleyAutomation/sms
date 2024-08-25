@@ -170,8 +170,8 @@ def register_webcam():
     port_num = 0
     ur = UR5Robot(gripper=1)
     clear_tcp(ur)
-
-    home_joints = np.array([0.30870315432548523, -1.2771266142474573, -1.5955479780780237, -1.754920784627096, 1.5260951519012451, 0.2983420491218567])
+    home_joints = np.array([-1.459527317677633, -1.832590405141012, -0.7605069319354456, 2.585705280303955, -1.4630921522723597, 0.04261291027069092])
+    
     ur.move_joint(home_joints,vel=1.0,acc=0.1)
     from ur5_interface.RAFT_Stereo.raftstereo.zed_stereo import Zed
     

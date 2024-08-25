@@ -93,6 +93,8 @@ def pose_estimation(
     corners, ids, _ = detector.detectMarkers(gray)
 
     if len(corners) == 0 or len(ids) == 0:
+        plt.imshow(frame)
+        plt.show()
         print("No markers found")
         return None
 
@@ -171,7 +173,7 @@ def register_webcam():
         while out is None:
             out = pose_estimation(img, cv2.aruco.DICT_ARUCO_ORIGINAL, k, d, l, True)
             if out is None:
-                input("Enter to take picture")
+                input("Enter to take picture2")
                 img = zed.get_frame()[0]
                 img = img.detach().cpu().numpy()
                 H_rob_world = ur.get_pose()

@@ -17,7 +17,7 @@ from sklearn.cluster import DBSCAN
 
 HOME_DIR = "/home/lifelong/sms/sms/ur5_interface/ur5_interface"
 # wrist_to_cam = RigidTransform.load("/home/lifelong/ur5_legs/T_webcam_wrist.tf")
-wrist_to_cam = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
+wrist_to_cam = RigidTransform.load('/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_zed_mini.tf')
 # threshold to filte
 nerf_frame_to_image_frame = np.array([[1,0,0,0],
                                         [0,-1,0,0],
@@ -35,19 +35,15 @@ if __name__ == "__main__":
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
     
-    home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
+    home_joints = np.array([-1.459527317677633, -1.832590405141012, -0.7605069319354456, 2.585705280303955, -1.4630921522723597, 0.04261291027069092])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
     world_to_wrist = robot.get_pose()
     world_to_wrist.from_frame = "wrist"
     world_to_cam = world_to_wrist * wrist_to_cam
-    proper_world_to_cam_translation = world_to_cam.translation
-    proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
-    proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=proper_world_to_cam_translation,from_frame='cam',to_frame='world')
+    proper_world_to_cam = RigidTransform(rotation=world_to_cam.rotation,translation=world_to_cam.translation,from_frame='cam',to_frame='world')
     proper_world_to_wrist = proper_world_to_cam * wrist_to_cam.inverse()
     
     robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
-    import pdb
-    pdb.set_trace()
     zed_mini_focal_length = 730
     cam = Zed()
     if(abs(cam.f_ - zed_mini_focal_length) > 10):
@@ -60,12 +56,17 @@ if __name__ == "__main__":
     depth,points,rgbs  = cam.get_depth_image_and_pointcloud(img_l,img_r,from_frame="cam")
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points.data.T)
+    print("Check if you are connected to Viser")
+    server = viser.ViserServer()
+    
+    server.add_point_cloud(name="pointcloud",points=points.data.T,colors=rgbs.data.T,point_size=0.001)
     plane_model, inliers = pcd.segment_plane(
         distance_threshold=0.01, ransac_n=3, num_iterations=1000
     )
+    server.add_point_cloud(name="pointcloud_table",points=points.data.T[inliers],colors=rgbs.data.T[inliers],point_size=0.001)
     table_points = points.data.T[inliers]
     # These were manually tuned
-    db = DBSCAN(eps=0.01, min_samples=600).fit(table_points)
+    db = DBSCAN(eps=0.02, min_samples=20).fit(table_points)
     filtered_table_point_mask = (db.labels_ != -1)
     filtered_table_pointcloud = points.data.T[inliers][filtered_table_point_mask]
     min_bounding_cube_camera_frame = np.array([np.min(filtered_table_pointcloud[:,0]),np.min(filtered_table_pointcloud[:,1]),np.min(points.data.T[:,2]),1]).reshape(-1,1)
@@ -86,14 +87,6 @@ if __name__ == "__main__":
         (points.data.T[:, 1] >= y_min_cam) & (points.data.T[:, 1] <= y_max_cam) &
         (points.data.T[:, 2] >= z_min_cam) & (points.data.T[:, 2] <= z_max_cam)
     ]
-    
-    print("Check if you are connected to Viser")
-    import pdb
-    pdb.set_trace()
-    server = viser.ViserServer()
-    
-    server.add_point_cloud(name="pointcloud",points=points.data.T,colors=rgbs.data.T,point_size=0.001)
-    server.add_point_cloud(name="pointcloud_table",points=points.data.T[inliers],colors=rgbs.data.T[inliers],point_size=0.001)
     server.add_point_cloud(name="pointcloud_table_filtered",points=points.data.T[inliers][filtered_table_point_mask],colors=rgbs.data.T[inliers][filtered_table_point_mask],point_size=0.001)
     server.add_point_cloud(name="full_pointcloud_filtered",points=full_filtered_pointcloud,colors=full_filtered_rgbcloud,point_size=0.001)
     
@@ -101,15 +94,6 @@ if __name__ == "__main__":
     pdb.set_trace()
     points_world_frame = proper_world_to_cam.apply(points)
     
-    import pdb
-    pdb.set_trace()
-    
-    server = viser.ViserServer()
-    
-    server.add_point_cloud(name="pointcloud_world",points=points_world_frame.data.T,colors=rgbs.data.T,point_size=0.001)
-    
-    import pdb
-    pdb.set_trace()
     min_bounding_cube_camera_frame = np.array([x_min_cam,y_min_cam,z_min_cam,1]).reshape(-1,1)
     max_bounding_cube_camera_frame = np.array([x_max_cam,y_max_cam,z_max_cam,1]).reshape(-1,1)
     min_bounding_cube_world = proper_world_to_cam.matrix @ min_bounding_cube_camera_frame
@@ -124,8 +108,18 @@ if __name__ == "__main__":
     x_max_world = max_bounding_cube_world[0,0]
     y_max_world = max_bounding_cube_world[1,0]
     z_max_world = max_bounding_cube_world[2,0]
-    
-    
+    if(x_min_world > x_max_world):
+        temp = x_min_world
+        x_min_world = x_max_world
+        x_max_world = temp
+    if(y_min_world > y_max_world):
+        temp = y_min_world
+        y_min_world = y_max_world
+        y_max_world = temp
+    if(z_min_world > z_max_world):
+        temp = z_min_world
+        z_min_world = z_max_world
+        z_max_world = temp
     full_filtered_pointcloud_world = points_world_frame.data.T[(points_world_frame.data.T[:, 0] >= x_min_world) & (points_world_frame.data.T[:, 0] <= x_max_world) &
         (points_world_frame.data.T[:, 1] >= y_min_world) & (points_world_frame.data.T[:, 1] <= y_max_world) &
         (points_world_frame.data.T[:, 2] >= z_min_world) & (points_world_frame.data.T[:, 2] <= z_max_world)
@@ -135,9 +129,6 @@ if __name__ == "__main__":
         (points_world_frame.data.T[:, 1] >= y_min_world) & (points_world_frame.data.T[:, 1] <= y_max_world) &
         (points_world_frame.data.T[:, 2] >= z_min_world) & (points_world_frame.data.T[:, 2] <= z_max_world)
     ]
-    
-    import pdb
-    pdb.set_trace()
     
     server = viser.ViserServer()
     
