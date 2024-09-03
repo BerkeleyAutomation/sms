@@ -107,7 +107,20 @@ def main():
     # mirror_ref = sl.Transform()
     # mirror_ref.set_translation(sl.Translation(2.75, 4.0, 0))
     wrist_zed_id = 16347230
-    zed = Zed(wrist_zed_id)
+    zed = Zed(flip_mode=True,cam_id=wrist_zed_id)
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    time.sleep(1.0)
+    print("Zed mini Exposure is set to: ",
+        zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
+    )
+    print("Zed mini Gain is set to: ",
+        zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+    )
+    print("Zed mini fps set to: ",
+            zed.cam.get_camera_information().camera_configuration.fps)
+    
+    
     calibration_params = zed.cam.get_camera_information().camera_configuration.calibration_parameters
 
     f_x = calibration_params.left_cam.fx

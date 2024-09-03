@@ -366,7 +366,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         robot = UR5Robot(gripper=1)
         clear_tcp(robot)
         #TODO: Make sure you have the correct home joints set
-        home_joints = np.array([-1.459527317677633, -1.832590405141012, -0.7605069319354456, 2.585705280303955, -1.4630921522723597, 0.04261291027069092])
+        home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
         robot.move_joint(home_joints,vel=1.0,acc=0.1)
         world_to_wrist = robot.get_pose()
         world_to_wrist.from_frame = "wrist"
@@ -385,12 +385,23 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         wrist_zed_id = 16347230
         extrinsic_zed_id = 22008760
     
-        cam = Zed(wrist_zed_id)
+        cam = Zed(flip_mode=True,cam_id=wrist_zed_id)
         extrinsic_zed = None
         if use_2_cams:
-            extrinsic_zed = Zed(extrinsic_zed_id, is_res_1080=True)
-        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 17)
-        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 38)
+            extrinsic_zed = Zed(flip_mode=False,cam_id=extrinsic_zed_id, is_res_1080=True)
+            extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
+            extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+            time.sleep(1.0)
+            print("Extrinsic Zed Exposure is set to: ",
+                extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
+            )
+            print("Extrinsic Zed Gain is set to: ",
+                extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+            )
+            print("Extrinsic Zed fps set to: ",
+                    extrinsic_zed.cam.get_camera_information().camera_configuration.fps)
+        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
+        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
         time.sleep(1.0)
         print("Zed mini Exposure is set to: ",
             cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
@@ -399,7 +410,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
             cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
         )
         print("Zed mini fps set to: ",
-              cam.cam.get_camera_information().camera_configuration.fps)
+                cam.cam.get_camera_information().camera_configuration.fps)
     global_pointcloud = None
     global_rgbcloud = None
     if(extrinsic_zed is not None):
@@ -448,10 +459,8 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     
     x_min_world,x_max_world,y_min_world,y_max_world,z_min_world,z_max_world,table_height = isolateTable(cam,world_to_cam)
     
-    trajectory_path = pathlib.Path(calibration_save_path + "/calibrate_extrinsics_trajectory.npy")
+    trajectory_path = pathlib.Path(calibration_save_path + "/prime_trajectory.npy")
     joints = np.load(str(trajectory_path))
-    import pdb
-    pdb.set_trace()
     left_images = []
     right_images = []
     world_to_images = []
@@ -547,7 +556,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     subsampled_not_close_rgbcloud = not_close_rgbcloud[not_close_gaussian_indices]
     full_subsampled_pointcloud = np.vstack((subsampled_close_pointcloud,subsampled_not_close_pointcloud))
     full_subsampled_rgbcloud = np.vstack((subsampled_close_rgbcloud,subsampled_not_close_rgbcloud))
-    final_indices = np.random.choice(full_subsampled_pointcloud.shape[0],num_gaussians_initialization,replace=False)
+    final_indices = np.random.choice(full_subsampled_pointcloud.shape[0],min(full_subsampled_pointcloud.shape[0],num_gaussians_initialization),replace=False)
     final_pointcloud = full_subsampled_pointcloud[final_indices]
     final_rgbcloud = full_subsampled_rgbcloud[final_indices]
     server = viser.ViserServer()

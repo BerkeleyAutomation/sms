@@ -170,7 +170,7 @@ def register_webcam():
     port_num = 0
     ur = UR5Robot(gripper=1)
     clear_tcp(ur)
-    home_joints = np.array([-1.459527317677633, -1.832590405141012, -0.7605069319354456, 2.585705280303955, -1.4630921522723597, 0.04261291027069092])
+    home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
     
     ur.move_joint(home_joints,vel=1.0,acc=0.1)
     from ur5_interface.RAFT_Stereo.raftstereo.zed_stereo import Zed
@@ -178,9 +178,32 @@ def register_webcam():
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
     
-    zed_mini = Zed(wrist_zed_id)
-    extrinsic_zed = Zed(extrinsic_zed_id, is_res_1080=True)
+    zed_mini = Zed(flip_mode=True,cam_id=wrist_zed_id)
+    extrinsic_zed = Zed(flip_mode=False,cam_id=extrinsic_zed_id, is_res_1080=True)
 
+    zed_mini.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
+    zed_mini.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    time.sleep(1.0)
+    print("Zed mini Exposure is set to: ",
+        zed_mini.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
+    )
+    print("Zed mini Gain is set to: ",
+        zed_mini.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+    )
+    print("Zed mini fps set to: ",
+            zed_mini.cam.get_camera_information().camera_configuration.fps)
+    
+    extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
+    extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    time.sleep(1.0)
+    print("Extrinsic Zed Exposure is set to: ",
+        extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
+    )
+    print("Extrinsic Zed Gain is set to: ",
+        extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+    )
+    print("Extrinsic Zed fps set to: ",
+            extrinsic_zed.cam.get_camera_information().camera_configuration.fps)
     teach_mode = False
     saved_joints = []
 
@@ -196,7 +219,7 @@ def register_webcam():
     zed_extrinsic_to_arucos = []
         
     center = np.array((0, -0.5, 0))
-    trajectory_path = pathlib.Path(calibration_save_path + "/calibrate_extrinsics_trajectory.npy")
+    trajectory_path = pathlib.Path(calibration_save_path + "/prime_trajectory.npy")
     traj = None
     automatic_path = False
     if trajectory_path.exists() and not teach_mode:

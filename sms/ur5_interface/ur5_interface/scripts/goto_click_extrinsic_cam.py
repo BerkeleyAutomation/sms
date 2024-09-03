@@ -105,7 +105,7 @@ def main():
     # mirror_ref = sl.Transform()
     # mirror_ref.set_translation(sl.Translation(2.75, 4.0, 0))
     extrinsic_zed_id = 22008760
-    zed = Zed(extrinsic_zed_id, is_res_1080=True)
+    zed = Zed(flip_mode=False,cam_id=extrinsic_zed_id, is_res_1080=True)
     calibration_params = zed.cam.get_camera_information().camera_configuration.calibration_parameters
 
     f_x = calibration_params.left_cam.fx

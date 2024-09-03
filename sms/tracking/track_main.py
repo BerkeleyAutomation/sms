@@ -33,7 +33,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240819_drill_solo2/sms-data/2024-08-20_040528/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240901_drill/sms-data/2024-09-01_150419/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -61,22 +61,26 @@ def main(
     
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
-    zed = Zed(cam_id=extrinsic_zed_id,is_res_1080=True) # Initialize ZED
-    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 17)
-    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 38)
+    zed = Zed(cam_id=extrinsic_zed_id, is_res_1080=True) # Initialize ZED
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    time.sleep(1.0)
+    print("Extrinsic Zed Exposure is set to: ",
+        zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
+    )
+    print("Extrinsic Zed Gain is set to: ",
+        zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.GAIN),
+    )
+    print("Extrinsic Zed fps set to: ",
+            zed.cam.get_camera_information().camera_configuration.fps)
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
-    home_joints = np.array([0.30947089195251465, -1.2793572584735315, -2.035713497792379, -1.388848606740133, 1.5713528394699097, 0.34230729937553406])
+    home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
     world_to_wrist = robot.get_pose()
     world_to_wrist.from_frame = "wrist"
     world_to_cam = world_to_wrist * WRIST_TO_CAM
-    proper_world_to_cam_translation = world_to_cam.translation
-    proper_world_to_cam_rotation = np.array([[0,1,0],[1,0,0],[0,0,-1]])
-    proper_world_to_cam = RigidTransform(rotation=proper_world_to_cam_rotation,translation=proper_world_to_cam_translation,from_frame='cam',to_frame='world')
-    proper_world_to_wrist = proper_world_to_cam * WRIST_TO_CAM.inverse()
-
-    robot.move_pose(proper_world_to_wrist,vel=1.0,acc=0.1)
+    proper_world_to_cam = world_to_cam
     
     zed_mini_focal_length = 730 
     if(abs(zed.f_ - zed_mini_focal_length) > 10): # Check if the ZED connected is ZED mini or ZED2
@@ -217,8 +221,6 @@ def main(
                                      [0,0,1,0],
                                      [0,0,0,1]])
             best_grasp = best_grasp @ rotate_180_z
-            import pdb
-            pdb.set_trace()
         coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         grasp_point_world.transform(best_grasp)

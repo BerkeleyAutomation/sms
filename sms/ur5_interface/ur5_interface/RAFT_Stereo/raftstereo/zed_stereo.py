@@ -5,23 +5,25 @@ from raftstereo.raft_stereo import *
 from raftstereo.utils.utils import InputPadder
 import argparse
 class Zed:
-    def __init__(self, cam_id=None, recording_file=None, start_time=0.0, is_res_1080=False):
+    def __init__(self, flip_mode,cam_id=None, recording_file=None, start_time=0.0, is_res_1080=False):
         init = sl.InitParameters()
         if cam_id is not None:
             init.set_from_serial_number(cam_id)
             self.cam_id = cam_id
         self.height_ = None
         self.width_ = None
+        if flip_mode:
+            init.camera_image_flip = sl.FLIP_MODE.ON
+        else:
+            init.camera_image_flip = sl.FLIP_MODE.OFF
         if recording_file is not None:
             init.set_from_svo_file(recording_file)
             # disable depth
-            init.camera_image_flip = sl.FLIP_MODE.OFF
             init.depth_mode = sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1
             init.camera_fps = 15
         elif is_res_1080:
-            init.camera_image_flip = sl.FLIP_MODE.OFF
             init.depth_mode=sl.DEPTH_MODE.NONE
             init.camera_resolution = sl.RESOLUTION.HD1080
             init.sdk_verbose = 1
@@ -36,7 +38,6 @@ class Zed:
             init.sdk_verbose = 1
             init.camera_fps = 15
             # flip camera
-            init.camera_image_flip = sl.FLIP_MODE.OFF
             init.depth_mode = sl.DEPTH_MODE.NONE
             init.depth_minimum_distance = 100  # millimeters
         self.init_res = 1920 if init.camera_resolution == sl.RESOLUTION.HD1080 else 1280
