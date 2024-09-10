@@ -33,7 +33,8 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240901_drill/sms-data/2024-09-01_150419/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_drill_solo/sms-data/2024-09-10_024004/config.yml"),
+    # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240907_shoe_drill_tools/sms-data/2024-09-07_214248/config.yml"),
 ):
     """Quick interactive demo for object tracking.
 
@@ -62,8 +63,8 @@ def main(
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
     zed = Zed(cam_id=extrinsic_zed_id, is_res_1080=True) # Initialize ZED
-    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
-    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 32)
+    zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 65)
     time.sleep(1.0)
     print("Extrinsic Zed Exposure is set to: ",
         zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),

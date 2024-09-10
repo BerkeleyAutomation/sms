@@ -360,7 +360,7 @@ def convert_pointcloud_to_image(points,rgbs,K,image_width,image_height):
 def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     debug = False
     save_dirs = set_up_dirs(scene_name)
-    use_robot, use_cam,use_2_cams = True, True,False
+    use_robot, use_cam,use_2_cams = True, True,True
     save_nerfstudio_intrinsics_per_frame_list = []
     if use_robot:
         robot = UR5Robot(gripper=1)
@@ -389,8 +389,8 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         extrinsic_zed = None
         if use_2_cams:
             extrinsic_zed = Zed(flip_mode=False,cam_id=extrinsic_zed_id, is_res_1080=True)
-            extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
-            extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+            extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 32)
+            extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 65)
             time.sleep(1.0)
             print("Extrinsic Zed Exposure is set to: ",
                 extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
@@ -400,8 +400,8 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
             )
             print("Extrinsic Zed fps set to: ",
                     extrinsic_zed.cam.get_camera_information().camera_configuration.fps)
+        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 28)
         cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
-        cam.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
         time.sleep(1.0)
         print("Zed mini Exposure is set to: ",
             cam.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
@@ -419,7 +419,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
         depth,points,rgbs  = extrinsic_zed.get_depth_image_and_pointcloud(img_l,img_r,from_frame="zed_extrinsic")
         K = np.array([[cam.f_,0,cam.cx_,0],[0,cam.f_,cam.cy_,0],[0,0,1,0]])
         image_width,image_height = cam.width_,cam.height_
-        
+        image_inpainted,depth_inpainted = convert_pointcloud_to_image(points,rgbs,K,image_width,image_height)
         points_world_frame = world_to_extrinsic_zed.apply(points)
         global_pointcloud = points_world_frame.data.T
         global_rgbcloud = rgbs.data.T
@@ -436,19 +436,20 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
                 
             points_world_frame = cam_pose.apply(points)
             debug_server.add_point_cloud('top_down_pc',points=points_world_frame.data.T,colors=rgbs.data.T,point_size=0.001)
+            
         
         world_to_extrinsic_zed_image_frame = world_to_extrinsic_zed.matrix @ nerf_frame_to_image_frame
         world_to_extrinsic_zed_image_rigid_tf = RigidTransform(rotation=world_to_extrinsic_zed_image_frame[:3,:3],translation=world_to_extrinsic_zed_image_frame[:3,3],from_frame="zed_extrinsic",to_frame="world")
         np.savetxt(os.path.join(save_dirs["poses"], "000.txt"), world_to_extrinsic_zed_image_rigid_tf.matrix)
         save_imgs(
-                        img_l,
-                        img_r,
-                        depth,
+                        image_inpainted,
+                        image_inpainted,
+                        depth_inpainted,
                         0,
                         save_dirs,
                         flip_table=flip_table,
                     ) 
-        save_nerfstudio_intrinsics_per_frame_list.append(extrinsic_zed.get_ns_intrinsics())
+        save_nerfstudio_intrinsics_per_frame_list.append(cam.get_ns_intrinsics())
     # pdb.set_trace()
     tool_to_wrist = RigidTransform()
     # need to set to zero so the frame is at the wrist joint

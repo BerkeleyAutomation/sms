@@ -181,8 +181,9 @@ def register_webcam():
     zed_mini = Zed(flip_mode=True,cam_id=wrist_zed_id)
     extrinsic_zed = Zed(flip_mode=False,cam_id=extrinsic_zed_id, is_res_1080=True)
 
+    zed_mini.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 28)
     zed_mini.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
-    zed_mini.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    
     time.sleep(1.0)
     print("Zed mini Exposure is set to: ",
         zed_mini.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
@@ -193,8 +194,9 @@ def register_webcam():
     print("Zed mini fps set to: ",
             zed_mini.cam.get_camera_information().camera_configuration.fps)
     
-    extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 48)
-    extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 62)
+    extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 32)
+    extrinsic_zed.cam.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 65)
+    
     time.sleep(1.0)
     print("Extrinsic Zed Exposure is set to: ",
         extrinsic_zed.cam.get_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE),
