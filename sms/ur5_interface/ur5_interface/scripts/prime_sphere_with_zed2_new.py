@@ -467,7 +467,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     world_to_images = []
     if use_robot:
         for i, joint in enumerate(tqdm(joints)):
-            robot.move_joint(joint,vel=0.4,acc=0.1)
+            robot.move_joint(joint,vel=0.7,acc=0.15)
             
             time.sleep(1.0)
 

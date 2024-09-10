@@ -154,7 +154,7 @@ class ToadObject:
         )
 
         # Simplify the mesh.
-        _mesh = _mesh.simplify_quadric_decimation(100)  # This affects speed by a lot!
+        _mesh = _mesh.simplify_quadric_decimation(1.0)  # This affects speed by a lot!
 
         # Correct normals are important for grasp sampling!
         try:

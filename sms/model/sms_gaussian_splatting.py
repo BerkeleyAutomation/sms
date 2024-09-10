@@ -203,7 +203,7 @@ class smsGaussianSplattingModelConfig(SplatfactoModelConfig):
     """maximum degree of spherical harmonics to use"""
     clip_loss_weight: float = 0.1
     """weight of clip loss"""
-    use_scale_regularization: bool = True
+    use_scale_regularization: bool = False
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
     max_gauss_ratio: float = 3.0
     """threshold of ratio of gaussian max to min scale before applying regularization
@@ -731,7 +731,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
             nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
             dino_feats = self.nn(nn_inputs).view(*feat_shape[:-1],-1)
             if not self.training:
-                dino_feats[dino_alpha.squeeze(-1) < 0.8] = 0
+                dino_feats[dino_alpha.squeeze(-1) < 0.4] = 0
             outputs['dino'] = dino_feats.squeeze(0)
         return outputs
     
@@ -1065,8 +1065,8 @@ class smsGaussianSplattingModel(SplatfactoModel):
         # Run cuml-based HDBSCAN
         clusterer = HDBSCAN(
             cluster_selection_epsilon=eps,
-            min_samples=25,
-            min_cluster_size=1000,
+            min_samples=50,
+            min_cluster_size=300,
             allow_single_cluster=False,
         ).fit(group_feats_downsampled)
 
@@ -1090,20 +1090,20 @@ class smsGaussianSplattingModel(SplatfactoModel):
         print(f"done. Took {time.time()-start} seconds. Found {labels.max() + 1} clusters.")
 
         noise_mask = labels == -1
-        if noise_mask.sum() != 0 and (labels>=0).sum() > 0:
-            # if there is noise, but not all of it is noise, relabel the noise
-            valid_mask = labels >=0
-            valid_positions = positions[valid_mask]
-            k = 1
-            nn_model = NearestNeighbors(
-                n_neighbors=k, algorithm="auto", metric="euclidean"
-            ).fit(valid_positions)
-            noise_positions = positions[noise_mask]
-            _, indices = nn_model.kneighbors(noise_positions)
-            # for now just pick the closest cluster
-            noise_relabels = labels[valid_mask][indices[:, 0]]
-            labels[noise_mask] = noise_relabels
-            clusterer.labels_ = labels
+        # if noise_mask.sum() != 0 and (labels>=0).sum() > 0:
+        #     # if there is noise, but not all of it is noise, relabel the noise
+        #     valid_mask = labels >=0
+        #     valid_positions = positions[valid_mask]
+        #     k = 1
+        #     nn_model = NearestNeighbors(
+        #         n_neighbors=k, algorithm="auto", metric="euclidean"
+        #     ).fit(valid_positions)
+        #     noise_positions = positions[noise_mask]
+        #     _, indices = nn_model.kneighbors(noise_positions)
+        #     # for now just pick the closest cluster
+        #     noise_relabels = labels[valid_mask][indices[:, 0]]
+        #     labels[noise_mask] = noise_relabels
+        #     clusterer.labels_ = labels
 
         labels = clusterer.labels_
         return labels

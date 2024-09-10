@@ -46,7 +46,7 @@ class RigidGroupOptimizerConfig:
     blur2_kernel_size: int = 45
     clip_grad: float = 0.8
     use_roi = True
-    use_mask_loss = True
+    use_mask_loss = False
     roi_inflate_proportion: float = 0.25
     roi_inflate: float = 75
     
@@ -164,7 +164,7 @@ class RigidGroupOptimizer:
         # for z_rot in np.linspace(0, np.pi * 2, n_seeds):
         whole_pose_adj = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
         # x y z qw qx qy qz
-        z_rot = 0
+        z_rot = 0.0
         quat = torch.from_numpy(vtf.SO3.from_z_radians(z_rot).wxyz).cuda()
         whole_pose_adj[:, :3] = torch.zeros(3, dtype=torch.float32, device="cuda")
         whole_pose_adj[:, 3:] = quat

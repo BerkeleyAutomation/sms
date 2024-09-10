@@ -33,7 +33,8 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_drill_solo/sms-data/2024-09-10_024004/config.yml"),
+    # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
+    # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240907_shoe_drill_tools/sms-data/2024-09-07_214248/config.yml"),
 ):
     """Quick interactive demo for object tracking.
@@ -304,9 +305,9 @@ def main(
                     server.add_image(
                         "cam/zed_left",
                         rgb_img,
-                        render_width=rgb_img.shape[1]/2500,
-                        render_height=rgb_img.shape[0]/2500,
-                        position = (0.5, -0.5, 0.5),
+                        render_width=rgb_img.shape[1]/3000,
+                        render_height=rgb_img.shape[0]/3000,
+                        position = (-0.5, -0.5, 0.5),
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
@@ -314,9 +315,9 @@ def main(
                     server.add_image(
                         "cam/gs_render",
                         outputs["rgb"].cpu().detach().numpy(),
-                        render_width=outputs["rgb"].shape[1]/2500,
-                        render_height=outputs["rgb"].shape[0]/2500,
-                        position = (0.5, 0.5, 0.5),
+                        render_width=outputs["rgb"].shape[1]/3000,
+                        render_height=outputs["rgb"].shape[0]/3000,
+                        position = (0.5, -0.5, 0.5),
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
