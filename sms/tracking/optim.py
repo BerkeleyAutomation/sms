@@ -186,6 +186,9 @@ class Optimizer:
         self.keep_inds = self.cluster_from_file[1]
         self.pipeline.model.keep_inds = self.cluster_from_file[1]
         self.pipeline.model.cluster_labels = self.cluster_from_file[0]
+        self.tfs = self.cluster_from_file[2] # (n,7) quat-pos
+        self.pipeline.cgtf_stack = self.cluster_from_file[2]
+        self.pipeline.model.cgtf_stack = self.cluster_from_file[2]
         keep_inds_mask = torch.zeros_like(self.pipeline.model.cluster_labels)
         keep_inds_mask[self.keep_inds] = 1
         keep_inds_mask = keep_inds_mask.to(torch.bool)
@@ -209,6 +212,9 @@ class Optimizer:
         
         cluster_labels = self.pipeline.model.cluster_labels[self.keep_inds].to(torch.int32)
         cluster_labels_global = self.pipeline.model.cluster_labels.to(torch.int32)
+        
+        self.tfs = self.pipeline.cgtf_stack # (n,7) quat-pos
+        self.pipeline.model.cgtf_stack = self.pipeline.cgtf_stack
         return cluster_labels, keep_inds_mask, cluster_labels_global
     
     def _setup_crops_and_groups(self) -> Tuple[torch.Tensor, List[torch.Tensor]]:

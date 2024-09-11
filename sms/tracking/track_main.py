@@ -330,6 +330,7 @@ def main(
                     
                     tf_list = opt.get_parts2world()
                     part_deltas.append(tf_list)
+                    manual_tf = [None, None]
                     for idx, tf in enumerate(tf_list):
                         server.add_frame(
                             f"object/group_{idx}",
@@ -339,6 +340,17 @@ def main(
                             axes_length=0.05,
                             axes_radius=.001
                         )
+                        
+                        p2manual_tf_SE3 = opt.optimizer.p2manual_tf_SE3[idx]
+                        manual_tf[idx] = server.add_frame(
+                            f"object/group_{idx}/manual_tf",
+                            position=p2manual_tf_SE3.wxyz_xyz[4:],
+                            wxyz= p2manual_tf_SE3.wxyz_xyz[:4],
+                            show_axes=True,
+                            axes_length=0.09,
+                            axes_radius=.0025
+                        )
+                        
                         mesh = opt.toad_object.meshes[idx]
                         server.add_mesh_trimesh(
                             f"object/group_{idx}/mesh",

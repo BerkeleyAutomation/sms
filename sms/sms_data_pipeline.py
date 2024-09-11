@@ -43,6 +43,7 @@ import os
 import os.path as osp
 import time
 import threading
+import copy
 
 def random_quat_tensor(N):
     """
@@ -211,9 +212,11 @@ class smsdataPipeline(VanillaPipeline):
         self.add_crop_to_previous_group = ViewerButton(name="Add Crop to Previous Group", cb_hook=self._add_crop_to_previous_group, disabled=True)
         self.view_crop_group_list = ViewerButton(name="View Crop Group List", cb_hook=self._view_crop_group_list, disabled=True)
         self.crop_group_list = []
+        self.crop_group_tf_list = []
         self.model_keep_inds = None
 
         self.move_current_crop = ViewerButton(name="Drag Current Crop", cb_hook=self._drag_current_crop, disabled=True)
+        # self.move_crop_frame = ViewerButton(name="Drag Crop Frame", cb_hook=self._drag_current_crop_frame, disabled=True)
         self.crop_transform_handle = None
 
         self.reset_state = ViewerButton(name="Reset State", cb_hook=self._reset_state, disabled=True)
@@ -355,6 +358,7 @@ class smsdataPipeline(VanillaPipeline):
         # self.crop_to_group_level.set_disabled(True)
         # self.crop_to_group_level.value = 0.5
         self.move_current_crop.set_disabled(True)
+        # self.move_crop_frame.set_disabled(True)
         self.crop_group = []
         if self.crop_transform_handle is not None:
             self.crop_transform_handle.remove()
@@ -369,6 +373,7 @@ class smsdataPipeline(VanillaPipeline):
     def _reset_crop_group_list(self, button: ViewerButton):
         """Reset the crop group list"""
         self.crop_group_list = []
+        self.crop_group_tf_list = []
         self.model_keep_inds = []
         self.add_crop_to_group_list.set_disabled(True)
         self.view_crop_group_list.set_disabled(True)
@@ -376,6 +381,8 @@ class smsdataPipeline(VanillaPipeline):
     def _add_crop_to_group_list(self, button: ViewerButton):
         """Add the current crop to the group list"""
         self.crop_group_list.append(self.crop_group[0])
+        self.crop_group_tf_list.append(copy.copy(self.crop_transform_handle))
+        self.crop_transform_handle.remove()
         self._reset_state(None, pop=False)
         self.view_crop_group_list.set_disabled(False)
     
@@ -488,7 +495,7 @@ class smsdataPipeline(VanillaPipeline):
 
 
             keep_list.append(keeps)
-
+            
             if len(keep_list) == 0:
                 print("No gaussians within crop, aborting")
                 # The only way to reset is to reset the state using the reset button.
@@ -534,9 +541,59 @@ class smsdataPipeline(VanillaPipeline):
         for name in self.model.gauss_params.keys():
             self.model.gauss_params[name] = prev_state[name][keep_inds]
 
+        # self.move_crop_frame.set_disabled(False)
+        """Add a transform control to the current scene, and update the model accordingly."""
+        # self.move_crop_frame.set_disabled(True)  # Disable user from creating another drag handle
+        self.viewer_control.viewer._trigger_rerender()
+        scene_centroid = self.model.gauss_params['means'].detach().mean(dim=0)
+        
+        
+        ## Delete 552-577 if reorienting to bbox is iffy
+        points = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.model.gauss_params['means'].cpu().numpy()))
+        # aabb = points.get_axis_aligned_bounding_box()
+        # aabb.color = (1, 0, 0)
+        obb = points.get_oriented_bounding_box()
+        # obb.color = (0, 1, 0)
+        # o3d.visualization.draw_geometries([o3d.geometry.TriangleMesh.create_coordinate_frame(), points, aabb, obb])
+        
+        R = obb.R
+        target_z = np.array([0, 0, 1])
+        dot_products = np.abs(R.T @ target_z)
+        z_index = np.argmax(dot_products)
+        remaining_indices = [i for i in range(3) if i != z_index]
+        new_x = R[:, remaining_indices[0]]
+        new_y = R[:, remaining_indices[1]]
+
+        # Create a new orthonormal basis with z-axis as [0, 0, 1]
+        new_z = target_z
+        new_x = new_x / np.linalg.norm(new_x)  
+        new_y = np.cross(new_z, new_x) 
+        new_y = new_y / np.linalg.norm(new_y) 
+
+        R_new = np.column_stack((new_x, new_y, new_z))
+        
+        import viser.transforms as vtf
+
+        oriented_quat = vtf.SO3.from_matrix(R_new)
+        
+        self.crop_transform_handle = self.viewer_control.viser_server.add_transform_controls(
+            name=f"/obj_transform",
+            position=(VISER_NERFSTUDIO_SCALE_RATIO*scene_centroid).cpu().numpy(),
+            wxyz = oriented_quat.wxyz,
+        )
+
+        @self.crop_transform_handle.on_update
+        def _(_):
+            handle_position = torch.tensor(self.crop_transform_handle.position).to(self.device)
+            handle_position = handle_position / VISER_NERFSTUDIO_SCALE_RATIO
+            handle_rotmat = quat_to_rotmat(torch.tensor(self.crop_transform_handle.wxyz).to(self.device).float())
+
+            self.viewer_control.viewer._trigger_rerender()
+        
+
+        
     def _drag_current_crop(self, button: ViewerButton):
         """Add a transform control to the current scene, and update the model accordingly."""
-        self.crop_to_group_level.set_disabled(True)  # Disable user from changing crop
         self.move_current_crop.set_disabled(True)  # Disable user from creating another drag handle
         
         scene_centroid = self.model.gauss_params['means'].detach().mean(dim=0)
@@ -576,6 +633,48 @@ class smsdataPipeline(VanillaPipeline):
 
             self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
 
+    # def _drag_current_crop_frame(self, button: ViewerButton):
+    #     """Add a transform control to the current scene, and update the model accordingly."""
+    #     self.move_crop_frame.set_disabled(True)  # Disable user from creating another drag handle
+        
+    #     scene_centroid = self.model.gauss_params['means'].detach().mean(dim=0)
+    #     self.crop_transform_handle = self.viewer_control.viser_server.add_transform_controls(
+    #         name=f"/obj_transform",
+    #         position=(VISER_NERFSTUDIO_SCALE_RATIO*scene_centroid).cpu().numpy(),
+    #     )
+
+    #     # Visualize the whole scene -- the points corresponding to the crop will be controlled by the transform handle.
+    #     # crop_inds = self.crop_group[self.crop_to_group_level.value]
+    #     # prev_state = self.state_stack[-1]
+    #     # for name in self.model.gauss_params.keys():
+    #     #     self.model.gauss_params[name] = prev_state[name].clone()
+
+    #     # curr_means = self.model.gauss_params['means'].clone().detach()
+    #     # curr_rotmats = quat_to_rotmat(self.model.gauss_params['quats'][crop_inds].detach())
+
+    #     @self.crop_transform_handle.on_update
+    #     def _(_):
+    #         handle_position = torch.tensor(self.crop_transform_handle.position).to(self.device)
+    #         handle_position = handle_position / VISER_NERFSTUDIO_SCALE_RATIO
+    #         handle_rotmat = quat_to_rotmat(torch.tensor(self.crop_transform_handle.wxyz).to(self.device).float())
+    #         print(handle_position)
+    #         print(handle_rotmat)
+    #         # means = self.model.gauss_params['means'].detach()
+    #         # quats = self.model.gauss_params['quats'].detach()
+
+    #         # means[crop_inds] = handle_position.float() + torch.matmul(
+    #         #     handle_rotmat, (curr_means[crop_inds] - curr_means[crop_inds].mean(dim=0)).T
+    #         # ).T
+    #         # quats[crop_inds] = torch.Tensor(Rot.from_matrix(
+    #         #     torch.matmul(handle_rotmat.float(), curr_rotmats.float()).cpu().numpy()
+    #         # ).as_quat()).to(self.device)  # this is in xyzw format
+    #         # quats[crop_inds] = quats[crop_inds][:, [3, 0, 1, 2]]  # convert to wxyz format
+
+    #         # self.model.gauss_params['means'] = torch.nn.Parameter(means.float())
+    #         # self.model.gauss_params['quats'] = torch.nn.Parameter(quats.float())
+
+    #         self.viewer_control.viewer._trigger_rerender()  # trigger viewer rerender
+            
     def _update_interaction_method(self, dropdown: ViewerDropdown):
         """Update the UI based on the interaction method"""
         hide_in_interactive = (not (dropdown.value == "Interactive")) # i.e., hide if in interactive mode
@@ -588,6 +687,7 @@ class smsdataPipeline(VanillaPipeline):
         self.crop_to_click.set_hidden(hide_in_interactive)
         self.crop_to_group_level.set_hidden(hide_in_interactive)
         self.move_current_crop.set_hidden(hide_in_interactive)
+        self.move_crop_frame.set_hidden(hide_in_interactive)
 
     def _click_gaussian(self, button: ViewerButton):
         """Start listening for click-based 3D point specification.
@@ -644,8 +744,16 @@ class smsdataPipeline(VanillaPipeline):
         output_dir = f"outputs/{self.datamanager.config.dataparser.data.name}"
         filename = Path(output_dir) / f"clusters.npy"
         
+        cgtf = []
+        for i in range(len(self.crop_group_tf_list)): 
+            tf = np.zeros(7)
+            tf[:4] = self.crop_group_tf_list[i].wxyz
+            tf[4:] = self.crop_group_tf_list[i].position / VISER_NERFSTUDIO_SCALE_RATIO
+            cgtf.append(tf) # w x y z translation
+            
+        self.cgtf_stack = np.stack(cgtf)
         if self.model.cluster_labels is not None and self.model.keep_inds is not None:
-            np.save(filename, np.array([self.model.cluster_labels, self.model.keep_inds], dtype=object))
+            np.save(filename, np.array([self.model.cluster_labels, self.model.keep_inds, self.cgtf_stack], dtype=object))
         else:
             print("No cluster labels to export")
     

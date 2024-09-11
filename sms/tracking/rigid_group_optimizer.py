@@ -14,7 +14,7 @@ from nerfstudio.engine.schedulers import (
 import warp as wp
 from sms.tracking.atap_loss import ATAPLoss
 from sms.tracking.utils import *
-from sms.tracking.utils2 import init_sam2, propogate_sam2
+# from sms.tracking.utils2 import init_sam2, propogate_sam2
 import viser.transforms as vtf
 import trimesh
 from typing import Tuple
@@ -113,14 +113,27 @@ class RigidGroupOptimizer:
         # Save the initial initial part to object transforms
         self.init_p2w = torch.empty(len(self.group_masks), 4, 4, dtype=torch.float32, device="cuda")
         self.init_p2w_7vec = torch.zeros(len(self.group_masks), 7, dtype=torch.float32, device="cuda")
+        self.p2manual_tf = torch.empty(len(self.group_masks), 4, 4, dtype=torch.float32, device="cuda")
+        self.p2manual_tf_SE3 = []
         self.init_p2w_7vec[:,3] = 1.0
+        
+        cg2w = self.sms_model.cgtf_stack # (n,7) wxyz - xyz
+        
         for i,g in enumerate(self.group_masks):
             gp_centroid = self.init_means[g].mean(dim=0)
             self.init_p2w_7vec[i,:3] = gp_centroid
             self.init_p2w[i,:,:] = torch.from_numpy(vtf.SE3.from_rotation_and_translation(
                 vtf.SO3.identity(), (gp_centroid).cpu().numpy()
             ).as_matrix()).float().cuda()
-
+            
+            # find p2cg transform for ith cg2w
+            se3 = vtf.SE3.from_rotation_and_translation(
+                vtf.SO3(cg2w[i,:4]), cg2w[i,4:] - gp_centroid.cpu().numpy()
+            )
+            self.p2manual_tf_SE3.append(se3) # n times SE3 objects
+            self.p2manual_tf[i,:,:] = torch.from_numpy(se3.as_matrix()).float().cuda() # (n, 4, 4)
+        # import pdb; pdb.set_trace()
+        
     def initialize_obj_pose(self, niter=100, n_seeds=6, render=False):
         renders1 = []
         renders2 = []

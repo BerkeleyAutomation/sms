@@ -358,12 +358,13 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.cluster_scene_shuffle_colors = ViewerButton(name="Reshuffle Cluster Colors", cb_hook=self._reshuffle_cluster_colors, disabled=False)
         self.cluster_labels = None
         self.keep_inds = None
+        self.cgtf_stack = None
         self.mapping = None # maps tracked object_id to cluster label
         self.rgb1_cluster0 = True
         self.temp_opacities = None
         self.frame_on_word = ViewerButton("Best Guess", cb_hook=self.localize_query_cb)
         self.relevancy_thresh = ViewerSlider("Relevancy Thresh", 0.0, 0, 1.0, 0.01)
-        self.cluster_eps = ViewerSlider("Cluster Eps", 0.08, 0.001, 0.2, 0.01)
+        self.cluster_eps = ViewerSlider("Cluster Eps", 0.02, 0.005, 0.1, 0.005)
 
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         super().load_state_dict(dict, **kwargs)
