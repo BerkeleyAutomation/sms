@@ -33,6 +33,8 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
                 K=K, local_regions=local_regions, filter_grasps=filter_grasps, segmap_id=segmap_id, 
                 forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=False)
     print("GENERATED GRASPS")
+    import pdb
+    pdb.set_trace()
     sorted_idxs = np.argsort(scores[0])[::-1]
     best_scores = {0:scores[0][sorted_idxs][:1]}
     best_grasps = {0:pred_grasps_cam[0][sorted_idxs][:1]}
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     parser.add_argument('--local_regions', action='store_true', default=False, help='Crop 3D local regions around given segments.')
     parser.add_argument('--filter_grasps', action='store_true', default=True,  help='Filter grasp contacts according to segmap.')
     parser.add_argument('--skip_border_objects', action='store_true', default=False,  help='When extracting local_regions, ignore segments at depth map boundary.')
-    parser.add_argument('--forward_passes', type=int, default=10,  help='Run multiple parallel forward passes to mesh_utils more potential contact points.')
+    parser.add_argument('--forward_passes', type=int, default=5,  help='Run multiple parallel forward passes to mesh_utils more potential contact points.')
     parser.add_argument('--segmap_id', type=int, default=0,  help='Only return grasps of the given object id')
     parser.add_argument('--arg_configs', nargs="*", type=str, default=[], help='overwrite config parameters')
     FLAGS = parser.parse_args()

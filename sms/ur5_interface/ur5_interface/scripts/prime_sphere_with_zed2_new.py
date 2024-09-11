@@ -460,7 +460,7 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     
     x_min_world,x_max_world,y_min_world,y_max_world,z_min_world,z_max_world,table_height = isolateTable(cam,world_to_cam)
     
-    trajectory_path = pathlib.Path(calibration_save_path + "/prime_trajectory.npy")
+    trajectory_path = pathlib.Path(calibration_save_path + "/prime_centered_trajectory.npy")
     joints = np.load(str(trajectory_path))
     left_images = []
     right_images = []

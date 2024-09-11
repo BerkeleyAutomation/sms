@@ -57,17 +57,21 @@ for joint in joints:
     # Keep top down pose the same (which is the first and last pose)
     if(i == 0 or i == len(joints) - 1):
         new_base_to_cam = base_to_cam
-    new_poses.append(new_base_to_cam)
+    
     new_base_to_wrist = new_base_to_cam * wrist_to_cam.inverse()
     new_joint = ur5_solver.ik(new_base_to_wrist.matrix,qinit = joint,brx=1e-2,bry=1e-2,brz=1e-2)
-    new_joints.append(new_joint)
+    if(new_joint is not None):
+        new_joints.append(new_joint)
+        ik_base_to_wrist = ur5_solver.fk(new_joint)
+        ik_base_to_wrist = RigidTransform(rotation=ik_base_to_wrist[:3,:3],translation=ik_base_to_wrist[:3,3],from_frame="wrist",to_frame="base")
+        ik_base_to_cam = base_to_wrist * wrist_to_cam
+        new_poses.append(ik_base_to_cam)
     i += 1
-import pdb
-pdb.set_trace()
 server = viser.ViserServer()
 visualize_poses(server,og_poses,prefix='og_poses')
 visualize_poses(server,new_poses,prefix='new_poses')
 server.add_point_cloud(name='table_center',points=table_center.reshape(-1,3),colors=np.array([0,0,0]).reshape(-1,3),point_size=0.05,point_shape='rounded')
 import pdb
 pdb.set_trace()
+np.save(calibration_save_path + "/prime_centered_trajectory.npy",np.array(new_joints))
 

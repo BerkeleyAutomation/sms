@@ -33,6 +33,8 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_brush_solo/sms-data/2024-09-10_154415/config.yml")
+
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240907_shoe_drill_tools/sms-data/2024-09-07_214248/config.yml"),
