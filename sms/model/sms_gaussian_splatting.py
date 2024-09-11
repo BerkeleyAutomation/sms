@@ -457,7 +457,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
         return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
 
-    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None, BLOCK_WIDTH=16, rgb_only = False) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_outputs(self, camera: Cameras, tracking=False, obj_id=None, invert = False, BLOCK_WIDTH=16, rgb_only = False) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -507,7 +507,10 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.last_size = (H, W)
         
         if obj_id is not None:
-            crop_ids = torch.where(self.cluster_labels[self.keep_inds] == self.mapping[obj_id].item())[0]
+            if invert:
+                crop_ids = torch.where(self.cluster_labels[self.keep_inds] != self.mapping[obj_id].item())[0]
+            else:
+                crop_ids = torch.where(self.cluster_labels[self.keep_inds] == self.mapping[obj_id].item())[0]
             
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]

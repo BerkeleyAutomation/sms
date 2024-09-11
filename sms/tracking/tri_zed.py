@@ -150,8 +150,8 @@ class StereoModel(torch.nn.Module):
         disparity_sparse = output["disparity_sparse"]
         mask = disparity_sparse != 0
         depth = torch.zeros_like(disparity_sparse)
-        # depth[mask] = baseline * intrinsics[0, 0, 0] / disparity_sparse[mask]
-        depth = baseline * intrinsics[0, 0, 0] / output["disparity"]
+        depth[mask] = baseline * intrinsics[0, 0, 0] / disparity_sparse[mask]
+        # depth = baseline * intrinsics[0, 0, 0] / output["disparity"]
         rgb = (rgb_left.squeeze(0).permute(1,2,0).cpu().detach().numpy()*255).astype(np.uint8)
         return depth, output["disparity"], disparity_sparse,rgb
 

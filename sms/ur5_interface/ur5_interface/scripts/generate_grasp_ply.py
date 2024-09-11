@@ -31,10 +31,8 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
 
     pred_grasps_cam, scores, contact_pts, pc_full, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
                 K=K, local_regions=local_regions, filter_grasps=filter_grasps, segmap_id=segmap_id, 
-                forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=False)
+                forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=True)
     print("GENERATED GRASPS")
-    import pdb
-    pdb.set_trace()
     sorted_idxs = np.argsort(scores[0])[::-1]
     best_scores = {0:scores[0][sorted_idxs][:1]}
     best_grasps = {0:pred_grasps_cam[0][sorted_idxs][:1]}

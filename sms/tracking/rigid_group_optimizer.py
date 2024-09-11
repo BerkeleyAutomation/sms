@@ -307,45 +307,44 @@ class RigidGroupOptimizer:
                     if not use_dino: render_rgb_only = True 
                     else: render_rgb_only = False
                     outputs = self.sms_model.get_outputs(camera, tracking=True, obj_id=i, BLOCK_WIDTH=8, rgb_only=render_rgb_only)
+
+                    # others_outputs = self.sms_model.get_outputs(camera, tracking=True, obj_id=i, invert = True, BLOCK_WIDTH=8, rgb_only=True)
+                    out_mask = (outputs['accumulation'] > 0.85)
+                    # if ((others_outputs['accumulation'] > 0.85).to(bool) & out_mask.to(bool)).any():
+                    #     intersection = ((others_outputs['accumulation'] > 0.85).to(bool) & out_mask.to(bool))
+                    #     depth_rank_binary = (outputs['depth'][intersection] - others_outputs['depth'][intersection]) > 0
+                    #     # True for intersections where obj is in front of others
+                    #     out_mask[intersection] = depth_rank_binary
+                                            
+                    valids = (out_mask.squeeze(-1) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
+                    feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(8,8, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
+                    
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
                     if use_depth:
                         feats_dict["real_depth"].append(frame.roi_frames[i].depth)
+                        # import matplotlib.pyplot as plt
+                        # import pdb; pdb.set_trace()
                     if use_mask:
                         feats_dict["real_mask"].append((frame.roi_frames[i].mask.to(torch.float32)).unsqueeze(-1))
                         
                     if use_dino:
                         dino_feats = frame.roi_frames[i].dino_feats
-                        # if use_mask:
-                        #     dino_feats[~frame.roi_frames[i].mask] = 0
-                        feats_dict["real_dino"].append(dino_feats)
-                    # if use_dino:
-                        # import pdb; pdb.set_trace()
+                        feats_dict["real_dino"].append(dino_feats[valids])
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
                     if use_dino:
-                        feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
-                    # feats_dict["rendered_dino"].append(outputs['dino'])
+                        feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0)[valids])
                     if use_depth:
                         feats_dict["rendered_depth"].append(outputs['depth'])
                         
-                    # accum = self.blur2(outputs['accumulation'].permute(2,0,1)[None]).squeeze(0).permute(1,2,0)
                     accum = outputs['accumulation']
-                    feats_dict["accumulation"].append(accum.to(torch.float32))
-                    # if use_mask:
-                    #     valids = ((outputs["accumulation"] > 0.8).squeeze(-1) & (frame.roi_frames[i].mask) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
-                    # else:
-                    valids = ((outputs["accumulation"] > 0.8).squeeze(-1) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
-                    feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(8,8, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
+                    feats_dict["accumulation"].append(accum.to(torch.float32))                    
+
                 for key in feats_dict.keys():
-                    # if use_dino == False:
-                        # import pdb; pdb.set_trace()
                     if len(feats_dict[key]) > 0:
                         for i in range(len(self.group_masks)):
                                 feats_dict[key][i] = feats_dict[key][i].contiguous().view(-1, feats_dict[key][i].shape[-1])
                         feats_dict[key] = torch.cat(feats_dict[key])
 
-        # import pdb; pdb.set_trace()
-        # loss = torch.zeros(1, device = 'cuda:0')[0]
-        # if use_dino:
         loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
         
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
@@ -354,9 +353,7 @@ class RigidGroupOptimizer:
         if use_depth:
             physical_depth = feats_dict["rendered_depth"] / self.dataset_scale
             valids = feats_dict['valids']
-            
-            if use_hand_mask:
-                valids = valids & frame.hand_mask.unsqueeze(-1)
+
             physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=2.0)[valids]
             real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=2.0)[valids]
             pix_loss = (physical_depth_clamped - real_depth_clamped) ** 2
@@ -368,7 +365,6 @@ class RigidGroupOptimizer:
             if not torch.isnan(pix_loss.mean()).any():
                 loss += pix_loss.mean()
         if use_mask and "real_mask" in feats_dict:
-            # mask_mse_loss = torch.square(feats_dict["real_mask"] - feats_dict["accumulation"]).mean()
             mask_bce_loss = F.binary_cross_entropy(feats_dict["accumulation"], feats_dict["real_mask"])
             if self.use_wandb:
                 wandb.log({"mask_bce_loss": mask_bce_loss.mean().item()})

@@ -33,7 +33,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_brush_solo/sms-data/2024-09-10_154415/config.yml")
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_iron/sms-data/2024-09-10_221743/config.yml")
 
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
@@ -282,15 +282,15 @@ def main(
                 # start_time2 = time.time()
                 assert isinstance(opt, Optimizer)
                 if opt.initialized:
-                    start_time3 = time.time()
+                    # start_time3 = time.time()
                     # opt.set_frame(left,opt.cam2world_ns,depth)
                     opt.set_observation(left,opt.cam2world_ns,depth)
-                    print("Set frame in ", time.time()-start_time3)
-                    start_time5 = time.time()
-                    n_opt_iters = 7
+                    # print("Set frame in ", time.time()-start_time3)
+                    # start_time5 = time.time()
+                    n_opt_iters = 9
                     with zed.raft_lock:
                         outputs = opt.step_opt(niter=n_opt_iters)
-                    print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
+                    # print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
                     # Add ZED img and GS render to viser
                     rgb_img = left.cpu().numpy()

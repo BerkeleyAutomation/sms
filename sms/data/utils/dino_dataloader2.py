@@ -167,6 +167,7 @@ class DinoDataloader(FeatureDataloader):
     def create(self, image_list):
         self.data = self.get_dino_feats(image_list)
         data_shape = self.data.shape
+        print(data_shape)
         if self.pca_dim != self.data.shape[-1]:
             self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim,niter=20)[2]
             self.data = torch.matmul(self.data.view(-1, data_shape[-1]), self.pca_matrix).reshape((*data_shape[:-1], self.pca_dim))

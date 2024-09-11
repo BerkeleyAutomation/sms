@@ -64,14 +64,18 @@ for joint in joints:
         new_joints.append(new_joint)
         ik_base_to_wrist = ur5_solver.fk(new_joint)
         ik_base_to_wrist = RigidTransform(rotation=ik_base_to_wrist[:3,:3],translation=ik_base_to_wrist[:3,3],from_frame="wrist",to_frame="base")
-        ik_base_to_cam = base_to_wrist * wrist_to_cam
+        ik_base_to_cam = ik_base_to_wrist * wrist_to_cam
         new_poses.append(ik_base_to_cam)
     i += 1
 server = viser.ViserServer()
 visualize_poses(server,og_poses,prefix='og_poses')
 visualize_poses(server,new_poses,prefix='new_poses')
 server.add_point_cloud(name='table_center',points=table_center.reshape(-1,3),colors=np.array([0,0,0]).reshape(-1,3),point_size=0.05,point_shape='rounded')
-import pdb
-pdb.set_trace()
+remove_indices = input("Which ones do you want to remove? Separate with space")
+remove_indices_list = [int(x) for x in remove_indices.split(' ')]
+indices = sorted(remove_indices_list, reverse=True)
+for index in indices:
+  if 0 <= index < len(new_joints):
+    new_joints.pop(index)
 np.save(calibration_save_path + "/prime_centered_trajectory.npy",np.array(new_joints))
 
