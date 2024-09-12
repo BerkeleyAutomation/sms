@@ -35,7 +35,7 @@ class RigidGroupOptimizerConfig:
     use_depth: bool = True
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
-    depth_loss_mult = 0.8
+    depth_loss_mult = 2.7
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
     pose_lr: float = 0.004
@@ -62,7 +62,7 @@ class RigidGroupOptimizer:
         group_labels: torch.Tensor,
         dataset_scale: float,
         render_lock = nullcontext(),
-        use_wandb = False,
+        use_wandb = True,
     ):
         """
         This one takes in a list of gaussian ID masks to optimize local poses for
@@ -341,7 +341,7 @@ class RigidGroupOptimizer:
                     #     out_mask[intersection] = depth_rank_binary
                                             
                     valids = (out_mask.squeeze(-1) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
-                    feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(8,8, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
+                    feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(9,9, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
                     
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
                     if use_depth:

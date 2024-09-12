@@ -48,7 +48,7 @@ def main(
     """
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
-    home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
+    home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
     server = viser.ViserServer()
     wp.init()
@@ -231,6 +231,22 @@ def main(
         pdb.set_trace()
         robot.move_pose(place_pose,vel=0.5,acc=0.1)
         time.sleep(1)
+        import pdb
+        pdb.set_trace()
+        robot.gripper.open()
+        time.sleep(1)
+        post_grasp_tf = np.array([[1,0,0,0],
+                                [0,1,0,0],
+                                [0,0,1,-0.05],
+                                [0,0,0,1]])
+        post_grasp_world_frame = place_pose.matrix @ post_grasp_tf
+        post_grasp_rigid_tf = RigidTransform(rotation=post_grasp_world_frame[:3,:3],translation=post_grasp_world_frame[:3,3])
+        robot.move_pose(post_grasp_rigid_tf,vel=0.5,acc=0.1)
+        time.sleep(1)
+        home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
+        robot.move_joint(home_joints,vel=1.0,acc=0.1)
+        time.sleep(1)
+        
         
     # Pick in frame a and Place in frame b 
     def get_place_pose(base_to_ee,base_to_frame_a,base_to_frame_b):
@@ -329,8 +345,6 @@ def main(
         # replace with viser
         grasp_server = viser.ViserServer()
         visualize_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, pred_grasps_filename, scores_filename, grasp_server)
-        
-        o3d.visualization.draw_geometries([full_pc,coordinate_frame,grasp_point_world,pre_grasp_point_world])
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
         robot.gripper.open()
         time.sleep(1)
@@ -412,12 +426,12 @@ def main(
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
-                    # if save_videos:
-                        # real_frames.append(rgb_img)
+                    if save_videos:
+                        real_frames.append(rgb_img)
                         
                         # real_frames.append(left.cpu().detach().numpy()) # Switch to this for no ROI bbox
                         
-                        # rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+                        rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
                     
                     tf_list = opt.get_parts2world()
                     part_deltas.append(tf_list)
