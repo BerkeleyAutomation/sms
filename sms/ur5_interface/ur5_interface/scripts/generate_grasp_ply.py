@@ -28,15 +28,47 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
 
     print(str(global_config))
     print('pid: %s'%(str(os.getpid())))
-
-    pred_grasps_cam, scores, contact_pts, pc_full, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
+    pred_grasps_world, scores, contact_pts, points_world, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
                 K=K, local_regions=local_regions, filter_grasps=filter_grasps, segmap_id=segmap_id, 
                 forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=True)
     print("GENERATED GRASPS")
     sorted_idxs = np.argsort(scores[0])[::-1]
     best_scores = {0:scores[0][sorted_idxs][:1]}
-    best_grasps = {0:pred_grasps_cam[0][sorted_idxs][:1]}
+    best_grasps = {0:pred_grasps_world[0][sorted_idxs][:1]}
     best_contact_pts = {0:contact_pts[0][sorted_idxs][:1]}
+    
+    point_cloud_world = o3d.geometry.PointCloud()
+    point_cloud_world.points = o3d.utility.Vector3dVector(points_world)
+    point_cloud_world.colors = o3d.utility.Vector3dVector(pc_colors)
+    coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    final_grasp_world_frame = best_grasps[0][0]
+    grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    grasp_point_world.transform(final_grasp_world_frame)
+    pre_grasp_tf = np.array([[1,0,0,0],
+                            [0,1,0,0],
+                            [0,0,1,-0.1],
+                            [0,0,0,1]])
+
+    pre_grasp_world_frame = final_grasp_world_frame @ pre_grasp_tf
+
+    pre_grasp_point_world = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+
+    pre_grasp_point_world.transform(pre_grasp_world_frame)
+
+    o3d.visualization.draw_geometries([point_cloud_world,coordinate_frame,grasp_point_world,pre_grasp_point_world])
+
+    np.save(f'{FLAGS.save_dir}/pred_grasps_world.npy', pred_grasps_world[0])
+
+    np.save(f'{FLAGS.save_dir}/scores.npy', scores[0])
+
+    np.save(f'{FLAGS.save_dir}/contact_pts.npy', contact_pts[0])
+
+
+    return pred_grasps_world, scores[0]
+
+    import pdb
+
+    pdb.set_trace()
     world_to_cam_tf = np.array([[0,-1,0,0],
                                 [-1,0,0,0],
                                 [0,0,-1,0],
@@ -105,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument('--local_regions', action='store_true', default=False, help='Crop 3D local regions around given segments.')
     parser.add_argument('--filter_grasps', action='store_true', default=True,  help='Filter grasp contacts according to segmap.')
     parser.add_argument('--skip_border_objects', action='store_true', default=False,  help='When extracting local_regions, ignore segments at depth map boundary.')
-    parser.add_argument('--forward_passes', type=int, default=5,  help='Run multiple parallel forward passes to mesh_utils more potential contact points.')
+    parser.add_argument('--forward_passes', type=int, default=1,  help='Run multiple parallel forward passes to mesh_utils more potential contact points.')
     parser.add_argument('--segmap_id', type=int, default=0,  help='Only return grasps of the given object id')
     parser.add_argument('--arg_configs', nargs="*", type=str, default=[], help='overwrite config parameters')
     FLAGS = parser.parse_args()

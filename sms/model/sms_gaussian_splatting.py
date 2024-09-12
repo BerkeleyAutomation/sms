@@ -359,6 +359,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.cluster_labels = None
         self.keep_inds = None
         self.cgtf_stack = None
+        self.render_features = True
         self.mapping = None # maps tracked object_id to cluster label
         self.rgb1_cluster0 = True
         self.temp_opacities = None
@@ -675,9 +676,9 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     outputs["instance"] = field_output[GaussianFieldHeadNames.INSTANCE].to(dtype=torch.float32)
 
 
-                if not self.training and not tracking:
+                if not self.training and not tracking and self.render_features:
                     # N x B x 1; N
-                    max_across, self.best_scales,instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
+                    max_across, self.best_scales, instances_out = self.get_max_across(means_crop, quats_crop, scales_crop, opacities_crop, viewmat, K, H, W, preset_scales=None)
 
                     if not torch.isnan(instances_out).any():
                         outputs["group_feats"] = instances_out
@@ -1094,20 +1095,20 @@ class smsGaussianSplattingModel(SplatfactoModel):
         print(f"done. Took {time.time()-start} seconds. Found {labels.max() + 1} clusters.")
 
         noise_mask = labels == -1
-        # if noise_mask.sum() != 0 and (labels>=0).sum() > 0:
-        #     # if there is noise, but not all of it is noise, relabel the noise
-        #     valid_mask = labels >=0
-        #     valid_positions = positions[valid_mask]
-        #     k = 1
-        #     nn_model = NearestNeighbors(
-        #         n_neighbors=k, algorithm="auto", metric="euclidean"
-        #     ).fit(valid_positions)
-        #     noise_positions = positions[noise_mask]
-        #     _, indices = nn_model.kneighbors(noise_positions)
-        #     # for now just pick the closest cluster
-        #     noise_relabels = labels[valid_mask][indices[:, 0]]
-        #     labels[noise_mask] = noise_relabels
-        #     clusterer.labels_ = labels
+        if noise_mask.sum() != 0 and (labels>=0).sum() > 0:
+            # if there is noise, but not all of it is noise, relabel the noise
+            valid_mask = labels >=0
+            valid_positions = positions[valid_mask]
+            k = 1
+            nn_model = NearestNeighbors(
+                n_neighbors=k, algorithm="auto", metric="euclidean"
+            ).fit(valid_positions)
+            noise_positions = positions[noise_mask]
+            _, indices = nn_model.kneighbors(noise_positions)
+            # for now just pick the closest cluster
+            noise_relabels = labels[valid_mask][indices[:, 0]]
+            labels[noise_mask] = noise_relabels
+            clusterer.labels_ = labels
 
         labels = clusterer.labels_
         return labels

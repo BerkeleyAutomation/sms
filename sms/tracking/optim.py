@@ -59,6 +59,9 @@ class Optimizer:
     initialized: bool = False
     """Whether the object pose has been initialized. This is set to `False` at `ToadOptimizer` initialization."""
     
+    render_features: bool = True
+    """Whether features are rendered in the gsplat eval mode"""
+    
     # use_featup: bool = False
     """Whether to use FeatUp https://github.com/mhamilton723/FeatUp"""
 
@@ -250,6 +253,7 @@ class Optimizer:
         group_masks = [(cid == cluster_labels_keep).cuda() for cid in range(cluster_labels_keep.max().item() + 1)]
         
         group_masks_global = [((cid == cluster_labels_global) & keep_inds_mask).cuda() for cid in self.pipeline.model.mapping]
+        self.pipeline.model.render_features = self.render_features
         return cluster_labels_keep.int().cuda(), group_masks, group_masks_global
 
     def set_frame(self, rgb, ns_camera, depth) -> None:
@@ -365,7 +369,13 @@ class Optimizer:
         return hands
     
     def get_clip_relevancy(self, clip_encoder: OpenCLIPNetwork) -> int:
-
+        n_phrases = len(clip_encoder.positives)
+        n_phrases_maxs = [None for _ in range(n_phrases)]
+        n_phrases_sims = [None for _ in range(n_phrases)]
+        scales_list = torch.linspace(0.0, 0.5, 30).to(self.optimizer.sms_model.device)
+        # scales_list = [0.1]
+        all_probs = []
+        
         init_means = self.optimizer.init_means # (N, 3)
         distances, indicies = self.optimizer.sms_model.k_nearest_sklearn(init_means, 3, True)
         distances = torch.from_numpy(distances).to(self.optimizer.sms_model.device)
@@ -378,12 +388,23 @@ class Optimizer:
         hash_encoding = hash_encoding.view(-1, 4, hash_encoding.shape[1])
         hash_encoding = (hash_encoding * weights.unsqueeze(-1))
         hash_encoding = hash_encoding.sum(dim=1)
-                
-        clip_feats = self.optimizer.sms_model.gaussian_field.get_clip_outputs_from_feature(hash_encoding, 
-            self.optimizer.sms_model.best_scales[0].to(self.optimizer.sms_model.device) * 
-            torch.ones(self.optimizer.sms_model.num_points, 1, device=self.optimizer.sms_model.device)) # (N, 96) -> (N, 512)
         
-        relevancy = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.optimizer.sms_model.num_points, -1)
+        for i, scale in enumerate(scales_list):
+            clip_feats = self.optimizer.sms_model.gaussian_field.get_clip_outputs_from_feature(hash_encoding, 
+                # self.optimizer.sms_model.best_scales[0].to(self.optimizer.sms_model.device) *
+                scale.to(self.optimizer.sms_model.device) *  
+                torch.ones(self.optimizer.sms_model.num_points, 1, device=self.optimizer.sms_model.device)) # (N, 96) -> (N, 512)
+
+            for j in range(n_phrases):
+                probs = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.optimizer.sms_model.num_points, -1)
+                
+                # probs = self.image_encoder.get_relevancy(clip_output_im.view(-1, self.image_encoder.embedding_dim), j)
+                pos_prob = probs[..., 0:1]
+                all_probs.append((pos_prob.max(), scale))
+                if n_phrases_maxs[j] is None or pos_prob.max() > n_phrases_sims[j].max():
+                    n_phrases_maxs[j] = scale
+                    n_phrases_sims[j] = pos_prob
+        relevancy = n_phrases_sims[0]
         return relevancy
     
     def state_to_ply(self, obj_id: int = None):

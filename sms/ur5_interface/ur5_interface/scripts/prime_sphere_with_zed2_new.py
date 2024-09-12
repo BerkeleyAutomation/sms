@@ -467,10 +467,13 @@ def prime_sphere_main(scene_name, single_image=False, flip_table=False):
     world_to_images = []
     if use_robot:
         for i, joint in enumerate(tqdm(joints)):
+            if(i == 1):
+                joint_waypoint = np.array([-0.029453579579488576, -1.678246800099508, -0.8632600943194788, -3.762667957936422, -1.3856657187091272, 3.1419308185577393])
+                robot.move_joint(joint_waypoint,vel=0.7,acc=0.15)
+                time.sleep(1.0)
             robot.move_joint(joint,vel=0.7,acc=0.15)
             
             time.sleep(1.0)
-
             wrist_pose = robot.get_pose()
             # print(pose)
             print(wrist_pose)

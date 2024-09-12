@@ -221,7 +221,7 @@ def register_webcam():
     zed_extrinsic_to_arucos = []
         
     center = np.array((0, -0.5, 0))
-    trajectory_path = pathlib.Path(calibration_save_path + "/prime_trajectory.npy")
+    trajectory_path = pathlib.Path(calibration_save_path + "/prime_centered_trajectory.npy")
     traj = None
     automatic_path = False
     if trajectory_path.exists() and not teach_mode:

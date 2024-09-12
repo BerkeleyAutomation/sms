@@ -35,6 +35,7 @@ class RigidGroupOptimizerConfig:
     use_depth: bool = True
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
+    depth_loss_mult = 0.6
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
     pose_lr: float = 0.004
@@ -128,8 +129,8 @@ class RigidGroupOptimizer:
             
             # find p2cg transform for ith cg2w
             se3 = vtf.SE3.from_rotation_and_translation(
-                vtf.SO3(cg2w[i,:4]), cg2w[i,4:] - gp_centroid.cpu().numpy()
-            )
+                vtf.SO3(cg2w[len(self.group_masks)-i-1,:4]), cg2w[len(self.group_masks)-i-1,4:] - gp_centroid.cpu().numpy()
+            ) # I have no idea why the ordering appears to be flipped here
             self.p2manual_tf_SE3.append(se3) # n times SE3 objects
             self.p2manual_tf[i,:,:] = torch.from_numpy(se3.as_matrix()).float().cuda() # (n, 4, 4)
         # import pdb; pdb.set_trace()
@@ -367,21 +368,22 @@ class RigidGroupOptimizer:
             physical_depth = feats_dict["rendered_depth"] / self.dataset_scale
             valids = feats_dict['valids']
 
-            physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=2.0)[valids]
-            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=2.0)[valids]
+            physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=2.5)[valids]
+            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=2.5)[valids]
             pix_loss = (physical_depth_clamped - real_depth_clamped) ** 2
-            pix_loss = pix_loss[
-                    (pix_loss < self.config.depth_ignore_threshold**2)
-                ]
+            # pix_loss = pix_loss[
+            #         (pix_loss < self.config.depth_ignore_threshold**2)
+            #     ]
             if self.use_wandb:
                 wandb.log({"depth_loss": pix_loss.mean().item()})
-            if not torch.isnan(pix_loss.mean()).any():
-                loss += pix_loss.mean()
+            if torch.isnan(pix_loss.mean()).any():
+                import pdb; pdb.set_trace()
+            loss = loss + self.config.depth_loss_mult * pix_loss.mean()
         if use_mask and "real_mask" in feats_dict:
             mask_bce_loss = F.binary_cross_entropy(feats_dict["accumulation"], feats_dict["real_mask"])
             if self.use_wandb:
                 wandb.log({"mask_bce_loss": mask_bce_loss.mean().item()})
-            loss += 0.6 * mask_bce_loss
+            loss = loss + 0.6 * mask_bce_loss
         if use_rgb:
             rgb_loss = 0.75 * (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
             loss = loss + rgb_loss

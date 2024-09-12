@@ -33,7 +33,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_iron/sms-data/2024-09-10_221743/config.yml")
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240911_shoe_and_shoebox/sms-data/2024-09-11_155024/config.yml")
 
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
@@ -129,6 +129,7 @@ def main(
 
     @opt_init_handle.on_click # Btn callback -- initializes tracking optimization
     def _(_):
+        print("Click set initial frame. Maybe you have to scroll on other viser window to get it going")
         assert (zed is not None) and (opt is not None)
         opt_init_handle.disabled = True
         l, _, depth = zed.get_frame(depth=True)
@@ -148,7 +149,7 @@ def main(
         if len(queries) <= 0:
             print("Enter something in the text box and if you want multiple words, separate with ;")
         object_query = queries[0]
-        clip_encoder.set_positives(object_query)
+        clip_encoder.set_positives([object_query])
         relevancy = opt.get_clip_relevancy(clip_encoder)
         group_masks = opt.optimizer.group_masks
 
@@ -160,22 +161,22 @@ def main(
         opt.max_relevancy_text = text_positives
         generate_grasps_handle.disabled = False
         execute_grasp_handle.disabled = False
-        if len(queries) == 2: # Object and part query
-            part_query = queries[1]
-            max_mask_label = opt.max_relevancy_label
-            clip_encoder.set_positives(part_query)
-            relevancy = opt.get_clip_relevancy(clip_encoder)
-            part_relevancies = relevancy[:,0:1][group_masks[max_mask_label]]
-            dino_features_for_object = opt.pipeline.model.gauss_params['dino_feats'][group_masks[max_mask_label]]
-            part_relevancies_filename = str(opt.config_path.parent.joinpath("part_relevancies.npy"))
-            dino_features_for_object_filename = str(opt.config_path.parent.joinpath("dino_features_for_object.npy"))
-            np.save(part_relevancies_filename,part_relevancies.detach().cpu().numpy())
-            np.save(dino_features_for_object_filename,dino_features_for_object.detach().cpu().numpy())
-            generate_grasps_handle.disabled = False
-            execute_grasp_handle.disabled = False
-            # Part Oriented Grasping here
-        else:
-            print("No language query provided")
+        # if len(queries) == 2: # Object and part query
+        #     part_query = queries[1]
+        #     max_mask_label = opt.max_relevancy_label
+        #     clip_encoder.set_positives(part_query)
+        #     relevancy = opt.get_clip_relevancy(clip_encoder)
+        #     part_relevancies = relevancy[:,0:1][group_masks[max_mask_label]]
+        #     dino_features_for_object = opt.pipeline.model.gauss_params['dino_feats'][group_masks[max_mask_label]]
+        #     part_relevancies_filename = str(opt.config_path.parent.joinpath("part_relevancies.npy"))
+        #     dino_features_for_object_filename = str(opt.config_path.parent.joinpath("dino_features_for_object.npy"))
+        #     np.save(part_relevancies_filename,part_relevancies.detach().cpu().numpy())
+        #     np.save(dino_features_for_object_filename,dino_features_for_object.detach().cpu().numpy())
+        #     generate_grasps_handle.disabled = False
+        #     execute_grasp_handle.disabled = False
+        #     # Part Oriented Grasping here
+        # else:
+        #     print("No language query provided")
     
     @generate_grasps_handle.on_click
     def _(_):
@@ -287,7 +288,7 @@ def main(
                     opt.set_observation(left,opt.cam2world_ns,depth)
                     # print("Set frame in ", time.time()-start_time3)
                     # start_time5 = time.time()
-                    n_opt_iters = 9
+                    n_opt_iters = 10
                     with zed.raft_lock:
                         outputs = opt.step_opt(niter=n_opt_iters)
                     # print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
