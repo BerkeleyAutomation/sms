@@ -129,8 +129,11 @@ class RigidGroupOptimizer:
             
             # find p2cg transform for ith cg2w
             se3 = vtf.SE3.from_rotation_and_translation(
-                vtf.SO3(cg2w[len(self.group_masks)-i-1,:4]), cg2w[len(self.group_masks)-i-1,4:] - gp_centroid.cpu().numpy()
-            ) # I have no idea why the ordering appears to be flipped here
+                vtf.SO3(cg2w[i,:4]), cg2w[i,4:] - gp_centroid.cpu().numpy()
+            )
+            # se3 = vtf.SE3.from_rotation_and_translation(
+            #     vtf.SO3(cg2w[len(self.group_masks)-i-1,:4]), cg2w[len(self.group_masks)-i-1,4:] - gp_centroid.cpu().numpy()
+            # ) # I have no idea why the ordering appears to be flipped here
             self.p2manual_tf_SE3.append(se3) # n times SE3 objects
             self.p2manual_tf[i,:,:] = torch.from_numpy(se3.as_matrix()).float().cuda() # (n, 4, 4)
         # import pdb; pdb.set_trace()
@@ -204,11 +207,11 @@ class RigidGroupOptimizer:
 
         self.prev_part_deltas = best_poses
 
-        import pdb; pdb.set_trace()        
+        # import pdb; pdb.set_trace()        
         del loss
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         torch.cuda.empty_cache()
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         return renders1, renders2
     
     @property

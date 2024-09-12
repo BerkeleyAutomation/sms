@@ -33,7 +33,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240911_shoe_and_shoebox/sms-data/2024-09-11_155024/config.yml")
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240911_2057_shoe_and_shoebox/sms-data/2024-09-11_210834/config.yml")
 
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
@@ -44,7 +44,12 @@ def main(
     Args:
         config_path: Path to the nerfstudio config file.
     """
-
+    robot = UR5Robot(gripper=1)
+    clear_tcp(robot)
+    home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
+    robot.move_joint(home_joints,vel=1.0,acc=0.1)
+    import pdb
+    pdb.set_trace()
     server = viser.ViserServer()
     wp.init()
     # Set up the camera.
@@ -77,10 +82,7 @@ def main(
     )
     print("Extrinsic Zed fps set to: ",
             zed.cam.get_camera_information().camera_configuration.fps)
-    robot = UR5Robot(gripper=1)
-    clear_tcp(robot)
-    home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
-    robot.move_joint(home_joints,vel=1.0,acc=0.1)
+    
     world_to_wrist = robot.get_pose()
     world_to_wrist.from_frame = "wrist"
     world_to_cam = world_to_wrist * WRIST_TO_CAM

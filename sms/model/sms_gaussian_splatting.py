@@ -818,14 +818,14 @@ class smsGaussianSplattingModel(SplatfactoModel):
             if len(mask) > 2:
                 instance_loss = torch.tensor(0.0, device=self.device)
 
-                idx = torch.randperm(len(mask))
+                idx = torch.randperm(len(mask)-1)
                 
                 total_ray_count = outputs["instance"].shape[0]
 
                 count = 0
                 
                 # Contrastive loss between mask features
-                for i in range(len(mask)-1):
+                for i in range(len(mask)-2):
                     if ((mask[idx[i]].sum()/total_ray_count <= self.config.min_mask_screensize) 
                         or 
                         (mask[idx[i+1]].sum()/total_ray_count <= self.config.min_mask_screensize)):
@@ -835,12 +835,18 @@ class smsGaussianSplattingModel(SplatfactoModel):
                     count += 1
                     
                 # Encourage features within a mask to be close to each other
-                for i in range(len(mask)):
+                for i in range(len(mask)-1):
                     if (mask[i].sum()/total_ray_count <= self.config.min_mask_screensize):
                         continue
-                    instance_loss += F.relu(torch.norm(outputs["instance"][mask[idx[i]]] - outputs["instance"][mask[idx[i]]].mean(dim=0).repeat(mask[idx[i]].sum(),1), p=2, dim=-1)).nanmean()
-                    count += 1
-                    
+
+                    else:
+                        instance_loss += F.relu(torch.norm(outputs["instance"][mask[idx[i]]] - outputs["instance"][mask[idx[i]]].mean(dim=0).repeat(mask[idx[i]].sum(),1), p=2, dim=-1)).nanmean()
+                        count += 1
+
+                # Push the negative mask to ones normed vector
+                instance_loss += F.relu(torch.norm(outputs["instance"][mask[-1]] - (torch.ones(128, device=self.device)/torch.ones(128, device=self.device).norm()).repeat(mask[-1].sum(),1), p=2, dim=-1)).nanmean()
+                count += 1
+                        
                 loss = instance_loss / count
                 if loss != 0:
                     loss_dict["instance_loss"] = loss

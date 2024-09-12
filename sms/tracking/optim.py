@@ -405,6 +405,8 @@ class Optimizer:
                     n_phrases_maxs[j] = scale
                     n_phrases_sims[j] = pos_prob
         relevancy = n_phrases_sims[0]
+        
+        import pdb; pdb.set_trace()
         return relevancy
     
     def state_to_ply(self, obj_id: int = None):
