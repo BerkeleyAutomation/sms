@@ -35,7 +35,7 @@ class RigidGroupOptimizerConfig:
     use_depth: bool = True
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
-    depth_loss_mult = 0.6
+    depth_loss_mult = 0.8
     depth_ignore_threshold: float = 0.1  # in meters
     use_atap: bool = False
     pose_lr: float = 0.004
@@ -196,12 +196,19 @@ class RigidGroupOptimizer:
                 best_poses,
                 self.group_labels,
             )
+            
         self.part_deltas = best_poses
         self.part_deltas = torch.nn.Parameter(self.part_deltas)
         self.part_deltas.requires_grad_(True)
         self.part_optimizer = torch.optim.Adam([self.part_deltas], lr=self.config.pose_lr)
 
         self.prev_part_deltas = best_poses
+
+        import pdb; pdb.set_trace()        
+        del loss
+        import pdb; pdb.set_trace()
+        torch.cuda.empty_cache()
+        import pdb; pdb.set_trace()
         return renders1, renders2
     
     @property
@@ -457,7 +464,10 @@ class RigidGroupOptimizer:
                     )
                 if self.config.use_roi:
                     outputs = self.sms_model.get_outputs(self.frame.frame.camera, tracking=True, rgb_only=True)
-        return {k:i.detach() for k,i in outputs.items()}
+        out_dict = {k:i.detach() for k,i in outputs.items()}
+        del loss
+        torch.cuda.empty_cache()
+        return out_dict
 
     def apply_to_model(self, part_deltas, group_labels):
         """
@@ -671,14 +681,14 @@ class RigidGroupOptimizer:
                 frame.add_roi(xmin, xmax, ymin, ymax)
         self.frame = frame
         
-        if self.config.use_mask_loss:
-            if init_mask:
-                init_sam2(self.frame, self.sms_model)
-            else:
-                propogate_sam2(self.frame)
-                for obj_id in range(len(self.frame._roi_frames)):
-                    xmin, xmax, ymin, ymax = self.calculate_roi(obj_id)
-                    self.frame.update_roi(obj_id, xmin, xmax, ymin, ymax)
+        # if self.config.use_mask_loss:
+        #     if init_mask:
+        #         init_sam2(self.frame, self.sms_model)
+        #     else:
+        #         propogate_sam2(self.frame)
+        #         for obj_id in range(len(self.frame._roi_frames)):
+        #             xmin, xmax, ymin, ymax = self.calculate_roi(obj_id)
+        #             self.frame.update_roi(obj_id, xmin, xmax, ymin, ymax)
         # self.frame = frame
         # if extrapolate_velocity and self.part_deltas.shape[0] > 1:
         #     if (self.prev_part_deltas != self.part_deltas).any().item():

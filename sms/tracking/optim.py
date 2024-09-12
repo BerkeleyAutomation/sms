@@ -59,7 +59,7 @@ class Optimizer:
     initialized: bool = False
     """Whether the object pose has been initialized. This is set to `False` at `ToadOptimizer` initialization."""
     
-    render_features: bool = True
+    render_features: bool = False
     """Whether features are rendered in the gsplat eval mode"""
     
     # use_featup: bool = False

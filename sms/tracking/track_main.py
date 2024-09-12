@@ -129,7 +129,7 @@ def main(
 
     @opt_init_handle.on_click # Btn callback -- initializes tracking optimization
     def _(_):
-        print("Click set initial frame. Maybe you have to scroll on other viser window to get it going")
+        print("Clicked set initial frame. If no reaction, try scrolling on eval viser window")
         assert (zed is not None) and (opt is not None)
         opt_init_handle.disabled = True
         l, _, depth = zed.get_frame(depth=True)
