@@ -110,6 +110,9 @@ class Optimizer:
         self.max_relevancy_label = None
         self.max_relevancy_text = None
 
+        self.place_max_relevancy_label = None
+        self.place_max_relevancy_text = None
+
         self.num_groups = len(self.group_masks)
         
         assert init_cam_pose.shape == (1, 3, 4)
@@ -391,14 +394,12 @@ class Optimizer:
         
         for i, scale in enumerate(scales_list):
             clip_feats = self.optimizer.sms_model.gaussian_field.get_clip_outputs_from_feature(hash_encoding, 
-                # self.optimizer.sms_model.best_scales[0].to(self.optimizer.sms_model.device) *
                 scale.to(self.optimizer.sms_model.device) *  
                 torch.ones(self.optimizer.sms_model.num_points, 1, device=self.optimizer.sms_model.device)) # (N, 96) -> (N, 512)
 
             for j in range(n_phrases):
                 probs = clip_encoder.get_relevancy(clip_feats / (clip_feats.norm(dim=-1, keepdim=True)+1e-6), 0).view(self.optimizer.sms_model.num_points, -1)
                 
-                # probs = self.image_encoder.get_relevancy(clip_output_im.view(-1, self.image_encoder.embedding_dim), j)
                 pos_prob = probs[..., 0:1]
                 all_probs.append((pos_prob.max(), scale))
                 if n_phrases_maxs[j] is None or pos_prob.max() > n_phrases_sims[j].max():
@@ -406,7 +407,6 @@ class Optimizer:
                     n_phrases_sims[j] = pos_prob
         relevancy = n_phrases_sims[0]
         
-        import pdb; pdb.set_trace()
         return relevancy
     
     def state_to_ply(self, obj_id: int = None):

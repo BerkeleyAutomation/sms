@@ -15,9 +15,11 @@ from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 from sms.tracking.utils2 import generate_videos, overlay
 from sms.tracking.toad_object import ToadObject
+from sms.tracking.grasp_vis_utils import visualize_grasps
 # import traceback 
 import open3d as o3d
 import pyzed.sl as sl
+from scipy.spatial.transform import Rotation as R
 import json
 import cv2
 import traceback
@@ -33,7 +35,7 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240911_2057_shoe_and_shoebox/sms-data/2024-09-11_210834/config.yml")
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240912_iron_shelf/sms-data/2024-09-12_012956/config.yml")
 
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
     # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
@@ -48,8 +50,6 @@ def main(
     clear_tcp(robot)
     home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
-    import pdb
-    pdb.set_trace()
     server = viser.ViserServer()
     wp.init()
     # Set up the camera.
@@ -64,9 +64,11 @@ def main(
     assert isinstance(clip_encoder, OpenCLIPNetwork)
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
-    query_handle = server.add_gui_button("Query", disabled=True) # Button for querying the object once the user has inputted the query
-    generate_grasps_handle = server.add_gui_button("Generate Grasps on Query", disabled=True) # Button for generating the grasps once the user has queried the object
-    execute_grasp_handle = server.add_gui_button("Execute Grasp for Query", disabled=True) # Button for executing the grasp once the user has generated all suitable grasps
+    pick_query_handle = server.add_gui_button("Pick Query", disabled=True) # Button for querying the object once the user has inputted the query
+    generate_grasps_handle = server.add_gui_button("Generate Grasps on Pick Query", disabled=True) # Button for generating the grasps once the user has queried the object
+    execute_grasp_handle = server.add_gui_button("Execute Grasp for Pick Query", disabled=True) # Button for executing the grasp once the user has generated all suitable grasps
+    place_query_handle = server.add_gui_button("Place Query", disabled=True)
+    execute_place_handle = server.add_gui_button("Execute Placement", disabled=True)
     
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
@@ -141,9 +143,9 @@ def main(
         # then have the zed_optimizer be allowed to run the optimizer steps.
     opt_init_handle.disabled = False
     text_handle.disabled = False
-    query_handle.disabled = False
+    pick_query_handle.disabled = False
 
-    @query_handle.on_click
+    @pick_query_handle.on_click
     def _(_):
         # TODO: Query for most relevant object
         text_positives = text_handle.value
@@ -163,6 +165,26 @@ def main(
         opt.max_relevancy_text = text_positives
         generate_grasps_handle.disabled = False
         execute_grasp_handle.disabled = False
+
+    @place_query_handle.on_click
+    def _(_):
+        # TODO: Query for most relevant object
+        text_positives = text_handle.value
+        queries = text_positives.split(";")
+        if len(queries) <= 0:
+            print("Enter something in the text box and if you want multiple words, separate with ;")
+        object_query = queries[0]
+        clip_encoder.set_positives([object_query])
+        relevancy = opt.get_clip_relevancy(clip_encoder)
+        group_masks = opt.optimizer.group_masks
+
+        relevancy_avg = []
+        for mask in group_masks:
+            relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
+        relevancy_avg = torch.tensor(relevancy_avg)
+        opt.place_max_relevancy_label = torch.argmax(relevancy_avg).item()
+        opt.place_max_relevancy_text = text_positives
+        execute_place_handle.disabled = False
         # if len(queries) == 2: # Object and part query
         #     part_query = queries[1]
         #     max_mask_label = opt.max_relevancy_label
@@ -179,6 +201,65 @@ def main(
         #     # Part Oriented Grasping here
         # else:
         #     print("No language query provided")
+    
+    @execute_place_handle.on_click
+    def _(_):
+        max_relevancy_label = opt.max_relevancy_label
+        place_max_relevancy_label = opt.place_max_relevancy_label
+        assert max_relevancy_label != place_max_relevancy_label, "You have the pick and the place set to the same spot"
+        print("HI")
+        pick_handle = manual_tf[max_relevancy_label]
+        place_handle = manual_tf[place_max_relevancy_label]
+        world_to_ee = robot.get_pose()
+        world_to_ee.from_frame = "ee"
+        world_to_pick = RigidTransform(rotation=R.from_quat(pick_handle.wxyz,scalar_first=True).as_matrix(),translation=pick_handle.position,to_frame="world",from_frame="object")
+        world_to_place = RigidTransform(rotation=R.from_quat(place_handle.wxyz,scalar_first=True).as_matrix(),translation=place_handle.position,to_frame="world",from_frame="object")
+        place_pose = get_place_pose(world_to_ee,world_to_pick,world_to_place)
+        place_pose_z = world_to_ee.copy()
+        place_pose_z.translation = np.array([world_to_ee.translation[0],world_to_ee.translation[1],place_pose.translation[2] + 0.01])
+        import pdb
+        pdb.set_trace()
+        robot.move_pose(place_pose_z,vel=0.5,acc=0.1)
+        time.sleep(1)
+        place_pose_rotation = place_pose_z
+        place_pose_rotation.rotation = place_pose.rotation
+        import pdb
+        pdb.set_trace()
+        robot.move_pose(place_pose_rotation,vel=0.5,acc=0.1)
+        time.sleep(1)
+        import pdb
+        pdb.set_trace()
+        robot.move_pose(place_pose,vel=0.5,acc=0.1)
+        time.sleep(1)
+        
+    # Pick in frame a and Place in frame b 
+    def get_place_pose(base_to_ee,base_to_frame_a,base_to_frame_b):
+        theta = 0
+        rotation_0_tf = RigidTransform(rotation=np.array([[np.cos(theta),-np.sin(theta),0],[np.sin(theta),np.cos(theta),0],[0,0,1]]),translation=np.zeros(3),to_frame='object',from_frame='object')
+        base_to_frame_b_0_rotation = base_to_frame_b * rotation_0_tf
+        theta = np.pi / 2
+        rotation_90_tf = RigidTransform(rotation=np.array([[np.cos(theta),-np.sin(theta),0],[np.sin(theta),np.cos(theta),0],[0,0,1]]),translation=np.zeros(3),to_frame='object',from_frame='object')
+        base_to_frame_b_90_rotation = base_to_frame_b * rotation_90_tf
+        theta = np.pi
+        rotation_180_tf = RigidTransform(rotation=np.array([[np.cos(theta),-np.sin(theta),0],[np.sin(theta),np.cos(theta),0],[0,0,1]]),translation=np.zeros(3),to_frame='object',from_frame='object')
+        base_to_frame_b_180_rotation = base_to_frame_b * rotation_180_tf
+        theta = -np.pi / 2
+        rotation_270_tf = RigidTransform(rotation=np.array([[np.cos(theta),-np.sin(theta),0],[np.sin(theta),np.cos(theta),0],[0,0,1]]),translation=np.zeros(3),to_frame='object',from_frame='object')
+        base_to_frame_b_270_rotation = base_to_frame_b * rotation_270_tf
+
+        base_to_frame_b_variations = [base_to_frame_b_0_rotation,base_to_frame_b_90_rotation,base_to_frame_b_180_rotation,base_to_frame_b_270_rotation]
+        min_angle = 1000
+        min_base_to_frame_b = None
+        for base_to_frame_b_variation in base_to_frame_b_variations:
+            frame_a_to_frame_b = base_to_frame_a.inverse() * base_to_frame_b_variation
+            angle = np.linalg.norm(R.from_matrix(frame_a_to_frame_b.rotation).as_rotvec())
+            if(angle < min_angle):
+                min_angle = angle
+                min_base_to_frame_b = base_to_frame_b_variation
+        base_to_frame_b = min_base_to_frame_b
+        ee_to_object = base_to_ee.inverse() * base_to_frame_a
+        new_base_to_ee = base_to_frame_b * ee_to_object.inverse()
+        return new_base_to_ee
     
     @generate_grasps_handle.on_click
     def _(_):
@@ -246,6 +327,9 @@ def main(
         post_grasp_world_frame = best_grasp @ post_grasp_tf
         post_grasp_rigid_tf = RigidTransform(rotation=post_grasp_world_frame[:3,:3],translation=post_grasp_world_frame[:3,3])
         # replace with viser
+        grasp_server = viser.ViserServer()
+        visualize_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, pred_grasps_filename, scores_filename, grasp_server)
+        
         o3d.visualization.draw_geometries([full_pc,coordinate_frame,grasp_point_world,pre_grasp_point_world])
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
         robot.gripper.open()
@@ -259,6 +343,8 @@ def main(
         time.sleep(1)
         robot.move_pose(post_grasp_rigid_tf,vel=0.3,acc=0.1)
         time.sleep(1)
+        place_query_handle.disabled = False
+        
         # center_gripper_joints = np.array(0.016485050320625305, -1.8846338430987757, -2.4609714190112513, 0.05439639091491699, 1.6994218826293945, 4.563924312591553)
         # robot.move_joint(center_gripper_joints,vel=0.3,acc=0.1)
         # robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
@@ -326,10 +412,12 @@ def main(
                         wxyz=(0, -0.7071068, -0.7071068, 0),
                         visible=True
                     )
-                    if save_videos:
-                        real_frames.append(rgb_img)
+                    # if save_videos:
+                        # real_frames.append(rgb_img)
+                        
                         # real_frames.append(left.cpu().detach().numpy()) # Switch to this for no ROI bbox
-                        rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+                        
+                        # rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
                     
                     tf_list = opt.get_parts2world()
                     part_deltas.append(tf_list)
@@ -345,10 +433,11 @@ def main(
                         )
                         
                         p2manual_tf_SE3 = opt.optimizer.p2manual_tf_SE3[idx]
+                        manual_tf2w_SE3 = tf @ p2manual_tf_SE3 
                         manual_tf[idx] = server.add_frame(
-                            f"object/group_{idx}/manual_tf",
-                            position=p2manual_tf_SE3.wxyz_xyz[4:],
-                            wxyz= p2manual_tf_SE3.wxyz_xyz[:4],
+                            f"object/manual_tf{idx}",
+                            position=manual_tf2w_SE3.wxyz_xyz[4:],
+                            wxyz= manual_tf2w_SE3.wxyz_xyz[:4],
                             show_axes=True,
                             axes_length=0.09,
                             axes_radius=.0025
@@ -363,6 +452,12 @@ def main(
                             obj_label_list[idx] = server.add_label(
                             f"object/group_{idx}/label",
                             text=opt.max_relevancy_text,
+                            position = (0,0,0.05),
+                            )
+                        elif idx == opt.place_max_relevancy_label:
+                            obj_label_list[idx] = server.add_label(
+                            f"object/group_{idx}/label",
+                            text=opt.place_max_relevancy_text,
                             position = (0,0,0.05),
                             )
                         else:
