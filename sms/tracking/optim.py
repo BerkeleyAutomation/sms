@@ -28,6 +28,7 @@ from sms.data.utils.dino_dataloader2 import DinoDataloader
 import os.path as osp
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
 import open3d as o3d
+from sms.tracking.observation import Future
 # from sms.data.utils.featup_dataloader2 import FeatupDataloader
 
 class Optimizer:
@@ -152,7 +153,11 @@ class Optimizer:
 
         self.orig_means = self.pipeline.model.gauss_params["means"].detach().clone()
         self.orig_quats = self.pipeline.model.gauss_params["quats"].detach().clone()
-
+        self.orig_scales = self.pipeline.model.gauss_params["scales"].detach().clone()
+        self.orig_opacities = self.pipeline.model.gauss_params["opacities"].detach().clone()    
+        self.orig_features_dc = self.pipeline.model.gauss_params["features_dc"].detach().clone()
+        self.orig_features_rest = self.pipeline.model.gauss_params["features_rest"].detach().clone()
+        
         self.optimizer = RigidGroupOptimizer(
             self.optimizer_config,
             self.pipeline.model,
@@ -173,7 +178,38 @@ class Optimizer:
         print(f"Time taken for init (object): {time.time() - start:.2f} s")
 
         self.initialized = False
-
+    
+    def background_snapshot(self) -> torch.Tensor:
+        """Get a snapshot of the background."""
+        cam = self.cam2world_ns
+        # binary and all tensors in list self.group_masks_global
+        clustered_objects_global_mask = (torch.sum(torch.stack(self.group_masks_global), axis=0) > 0)
+        all_means = self.pipeline.__dict__['state_stack'][0]['means'][~clustered_objects_global_mask].to('cuda')
+        all_quats = self.pipeline.__dict__['state_stack'][0]['quats'][~clustered_objects_global_mask].to('cuda')
+        all_scales = self.pipeline.__dict__['state_stack'][0]['scales'][~clustered_objects_global_mask].to('cuda')
+        all_opacities = self.pipeline.__dict__['state_stack'][0]['opacities'][~clustered_objects_global_mask].to('cuda')
+        all_features_dc = self.pipeline.__dict__['state_stack'][0]['features_dc'][~clustered_objects_global_mask].to('cuda')
+        all_features_rest = self.pipeline.__dict__['state_stack'][0]['features_rest'][~clustered_objects_global_mask].to('cuda')
+        
+        self.pipeline.model.gauss_params["means"] = all_means
+        self.pipeline.model.gauss_params["quats"] = all_quats
+        self.pipeline.model.gauss_params["scales"] = all_scales
+        self.pipeline.model.gauss_params["opacities"] = all_opacities
+        self.pipeline.model.gauss_params["features_dc"] = all_features_dc
+        self.pipeline.model.gauss_params["features_rest"] = all_features_rest
+        
+        
+        outputs = self.pipeline.model.get_outputs(cam.to('cuda'), tracking=False, BLOCK_WIDTH=16, rgb_only = True)
+                
+        background = outputs["rgb"].squeeze().detach().cpu().numpy()
+        self.pipeline.model.gauss_params["means"] = self.orig_means.clone()
+        self.pipeline.model.gauss_params["quats"] = self.orig_quats.clone()
+        self.pipeline.model.gauss_params["scales"] = self.orig_scales.clone()
+        self.pipeline.model.gauss_params["opacities"] = self.orig_opacities.clone()
+        self.pipeline.model.gauss_params["features_dc"] = self.orig_features_dc.clone()
+        self.pipeline.model.gauss_params["features_rest"] = self.orig_features_rest.clone()
+        return background
+            
     def reset_optimizer(self) -> None:
         """Re-generate self.optimizer."""
         self.optimizer.reset_transforms()
@@ -272,7 +308,26 @@ class Optimizer:
         target_frame_rgb = (rgb/255)
         
         frame = PosedObservation(rgb=target_frame_rgb, camera=ns_camera, dino_fn=self.pipeline.datamanager.dino_dataloader.get_pca_feats, metric_depth_img=depth)
-        
+        if hasattr(self.optimizer, 'frame'):
+            frame_dict = self.optimizer.frame.__dict__
+            for attr in list(frame_dict.keys()):
+                if isinstance(frame_dict[attr], torch.Tensor):
+                    frame_dict[attr] = frame_dict[attr].detach().cpu()
+                    del frame_dict[attr]
+            if hasattr(self.optimizer.frame, '_roi_frames'):
+                for roiframe in self.optimizer.frame._roi_frames:
+                    roiframe_dict = roiframe.__dict__
+                    for attr in list(roiframe_dict.keys()):
+                        if isinstance(roiframe_dict[attr], torch.Tensor):
+                            roiframe_dict[attr] = roiframe_dict[attr].detach().cpu()
+                        if isinstance(roiframe_dict[attr], Future):
+                            del roiframe_dict[attr]
+                    del roiframe
+                del self.optimizer.frame._roi_frames
+            # import pdb; pdb.set_trace()
+            del self.optimizer.frame
+            # torch.cuda.empty_cache()
+        # import pdb; pdb.set_trace()
         self.optimizer.set_observation(frame)
 
     def init_obj_pose(self):

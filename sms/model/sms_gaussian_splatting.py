@@ -339,13 +339,13 @@ class smsGaussianSplattingModel(SplatfactoModel):
         self.step = 0
 
         self.crop_box: Optional[OrientedBox] = None
+        
         if self.config.background_color == "random":
             self.background_color = torch.tensor(
                 [0.1490, 0.1647, 0.2157]
             )  # This color is the same as the default background color in Viser. This would only affect the background color when rendering.
         else:
-            self.background_color = get_color(self.config.background_color)
-
+            self.background_color = get_color(self.config.background_color)        
         #sms init
         self.steps_since_add = 0
         
@@ -496,7 +496,9 @@ class smsGaussianSplattingModel(SplatfactoModel):
                 background = renderers.BACKGROUND_COLOR_OVERRIDE.to(self.device)
             else:
                 background = self.background_color.to(self.device)
-
+        
+        # override background color to white
+        background = get_color('white').to(self.device)
         if self.crop_box is not None and not self.training:
             crop_ids = self.crop_box.within(self.means).squeeze()
             if crop_ids.sum() == 0:
@@ -844,7 +846,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         count += 1
 
                 # Push the negative mask to ones normed vector
-                instance_loss += 0.1 * F.relu(torch.norm(outputs["instance"][mask[-1]] - (torch.ones(128, device=self.device)/torch.ones(128, device=self.device).norm()).repeat(mask[-1].sum(),1), p=2, dim=-1)).nanmean()
+                instance_loss += 0.3 * F.relu(torch.norm(outputs["instance"][mask[-1]] - (torch.ones(128, device=self.device)/torch.ones(128, device=self.device).norm()).repeat(mask[-1].sum(),1), p=2, dim=-1)).nanmean()
                 count += 1
                         
                 loss = instance_loss / count

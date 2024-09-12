@@ -60,7 +60,9 @@ class Frame:
                 antialias=True,
             ).permute(1, 2, 0)
         self.metric_depth = metric_depth_img is not None
-        self.obj_mask = None        
+        self.obj_mask = None     
+        
+           
         @torch.no_grad()
         def _get_depth():
             if metric_depth_img is not None:

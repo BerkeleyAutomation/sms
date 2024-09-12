@@ -233,6 +233,7 @@ def main(
         time.sleep(1)
         import pdb
         pdb.set_trace()
+        robot.move_until_contact(vel=np.array([0,0,-0.05,0,0,0]), thres=20, acc=0.15, direction=np.array((0, 0, 1, 0, 0, 0)))
         robot.gripper.open()
         time.sleep(1)
         post_grasp_tf = np.array([[1,0,0,0],
@@ -386,7 +387,8 @@ def main(
                 assert isinstance(opt, Optimizer)
                 if opt.initialized:
                     # start_time3 = time.time()
-                    # opt.set_frame(left,opt.cam2world_ns,depth)
+                    # if not hasattr(opt.optimizer, 'frame'):
+                        # opt.set_frame(left,opt.cam2world_ns,depth)
                     opt.set_observation(left,opt.cam2world_ns,depth)
                     # print("Set frame in ", time.time()-start_time3)
                     # start_time5 = time.time()
@@ -499,11 +501,27 @@ def main(
             # Generate videos from the frames if the user interrupts the loop with ctrl+c
             frames_dict = {"real_frames": real_frames, 
                            "rendered_rgb": rendered_rgb_frames}
+            background = opt.background_snapshot() # (H, W, 3)
             timestr = generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
+            
+            path = config_path.parent.joinpath(f"{timestr}")
+            
+            # save the background image
+            np.save(path.joinpath(f"background.npy"), background)
+            
+            # save the background image to a .png file
+            from PIL import Image
+            im = Image.fromarray((background*255).astype(np.uint8))
+            im.save(str(path.joinpath(f"background.png")))
             
             # Save part deltas to npy file
             path = config_path.parent.joinpath(f"{timestr}")
             np.save(path.joinpath("part_deltas_traj.npy"), np.array(part_deltas))
+            
+            # save cluster npy file
+            clusters = opt.cluster_from_file
+            np.save(path.joinpath("clusters.npy"), clusters)
+            
             exit()
         except Exception as e:
             print("An exception occured: ", e)

@@ -62,7 +62,7 @@ class RigidGroupOptimizer:
         group_labels: torch.Tensor,
         dataset_scale: float,
         render_lock = nullcontext(),
-        use_wandb = True,
+        use_wandb = False,
     ):
         """
         This one takes in a list of gaussian ID masks to optimize local poses for
@@ -191,7 +191,6 @@ class RigidGroupOptimizer:
             best_loss = loss
             # best_outputs = outputs
             best_poses = final_poses
-            
         self.set_observation(PosedObservation(rgb=self.frame.rgb, camera=self.frame.camera, dino_fn=self.frame._dino_fn, metric_depth_img=self.frame.depth), extrapolate_velocity=False, init_mask=True)
         _, best_poses = try_opt(best_poses, 10, use_depth=True, rndr=render, use_mask=self.config.use_mask_loss, use_roi=True)# do a few optimization steps with depth
         with self.render_lock:
@@ -209,6 +208,7 @@ class RigidGroupOptimizer:
 
         # import pdb; pdb.set_trace()        
         del loss
+        del self.frame
         # import pdb; pdb.set_trace()
         torch.cuda.empty_cache()
         # import pdb; pdb.set_trace()
@@ -314,7 +314,7 @@ class RigidGroupOptimizer:
                 part_deltas, self.group_labels
             )
             if not use_roi:
-                outputs = self.sms_model.get_outputs(frame.camera, tracking=True, BLOCK_WIDTH=8)
+                outputs = self.sms_model.get_outputs(frame.camera, tracking=True, BLOCK_WIDTH=8, rgb_only=False)
                 feats_dict["real_rgb"]=frame.rgb
                 feats_dict["real_dino"]=frame.dino_feats
                 feats_dict["real_depth"]=frame.depth
@@ -458,7 +458,7 @@ class RigidGroupOptimizer:
                 wandb.log({"loss": loss.item()})
         # reset lr
         self.part_optimizer.param_groups[0]["lr"] = self.config.pose_lr
-        
+        # import pdb; pdb.set_trace()
         with torch.no_grad():
             with self.render_lock:
                 self.sms_model.eval()
