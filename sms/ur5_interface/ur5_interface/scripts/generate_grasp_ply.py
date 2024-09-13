@@ -30,7 +30,7 @@ def generate_grasps(seg_np_path, full_np_path, pc_bounding_box_path, ckpt_dir, z
     print('pid: %s'%(str(os.getpid())))
     pred_grasps_world, scores, contact_pts, points_world, pc_colors = inference(global_config, ckpt_dir, seg_np_path, full_np_path,pc_bounding_box_path, z_range=z_range,
                 K=K, local_regions=local_regions, filter_grasps=filter_grasps, segmap_id=segmap_id, 
-                forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=True)
+                forward_passes=forward_passes, skip_border_objects=skip_border_objects,debug=False)
     print("GENERATED GRASPS")
     sorted_idxs = np.argsort(scores[0])[::-1]
     best_scores = {0:scores[0][sorted_idxs][:1]}

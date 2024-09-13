@@ -484,7 +484,8 @@ class smsdataPipeline(VanillaPipeline):
 
             else:
                 clusters = np.asarray(keep_points.cluster_dbscan(eps=0.02, min_points=5))
-
+            # else:
+            #     clusters = np.asarray(keep_points)
             # Choose the cluster that contains the click point. If there is none, move to the next scale.
             cluster_inds = clusters[np.isin(keeps, sphere_inds)]
             cluster_inds = cluster_inds[cluster_inds != -1]
@@ -513,10 +514,13 @@ class smsdataPipeline(VanillaPipeline):
             
             sphere_inds_keep = [(torch.where(keep_inds_list == torch.tensor(sphere_inds)[i])[0]).item() for i in sphere_ind_vote.tolist()]
             # Secondary clustering in cartesian space to filter outliers
-            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.007, min_points=1)
+            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.008, min_points=1)
+            # group_clusters = np.asarray(keep_points_o3d.points)
+            # import pdb; pdb.set_trace()
             inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
             keep_inds_list_inner = torch.where(torch.tensor(group_clusters) == inner_vote)[0]
             keep_list = [keep_inds_list[keep_inds_list_inner]]
+            
         
         table_bounding_cube_filename = self.datamanager.get_datapath().joinpath("table_bounding_cube.json")
         with open(table_bounding_cube_filename, 'r') as json_file: 

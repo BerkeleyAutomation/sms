@@ -13,7 +13,7 @@ from nerfstudio.cameras.cameras import Cameras
 import warp as wp
 from ur5py.ur5 import UR5Robot
 from sms.encoders.openclip_encoder import OpenCLIPNetworkConfig, OpenCLIPNetwork
-from sms.tracking.utils2 import generate_videos, overlay
+from sms.tracking.utils2 import overlay
 from sms.tracking.toad_object import ToadObject
 from sms.tracking.grasp_vis_utils import visualize_grasps
 # import traceback 
@@ -23,6 +23,8 @@ from scipy.spatial.transform import Rotation as R
 import json
 import cv2
 import traceback
+import os
+from PIL import Image
 
 WRIST_TO_CAM = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/wrist_to_cam.tf")
 WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_interface/calibration_outputs/world_to_extrinsic_zed.tf")
@@ -35,17 +37,9 @@ def clear_tcp(robot):
     robot.set_tcp(tool_to_wrist)
     
 def main(
-    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240912_iron_shelf/sms-data/2024-09-12_181456_exp/config.yml")
-
-    # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_1350_shoe_solo/sms-data/2024-09-10_135106/config.yml")
-    # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240910_shoe_and_shoebox/sms-data/2024-09-10_053819/config.yml"),
-    # config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240907_shoe_drill_tools/sms-data/2024-09-07_214248/config.yml"),
+    config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240912_jigsaw_shelf/sms-data/2024-09-13_001842/config.yml")
 ):
-    """Quick interactive demo for object tracking.
 
-    Args:
-        config_path: Path to the nerfstudio config file.
-    """
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
     home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
@@ -65,6 +59,7 @@ def main(
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
     pick_query_handle = server.add_gui_button("Pick Query", disabled=True) # Button for querying the object once the user has inputted the query
+    e_stop_reset_handle = server.add_gui_button("Reset E-Stop", disabled=False) # Button for resetting the E-Stop
     generate_grasps_handle = server.add_gui_button("Generate & Execute Grasps on Pick Query", disabled=True) # Button for generating the grasps once the user has queried the object
     # execute_grasp_handle = server.add_gui_button("Execute Grasp for Pick Query", disabled=True) # Button for executing the grasp once the user has generated all suitable grasps
     place_query_handle = server.add_gui_button("Place Query", disabled=True)
@@ -118,7 +113,7 @@ def main(
     )
 
     l, _, depth = zed.get_frame(depth=True)  # Grab a frame from the camera.
-    
+
     opt = Optimizer( # Initialize the optimizer
         config_path,
         zed.get_K(),
@@ -185,23 +180,7 @@ def main(
         opt.place_max_relevancy_label = torch.argmax(relevancy_avg).item()
         opt.place_max_relevancy_text = text_positives
         execute_place_handle.disabled = False
-        # if len(queries) == 2: # Object and part query
-        #     part_query = queries[1]
-        #     max_mask_label = opt.max_relevancy_label
-        #     clip_encoder.set_positives(part_query)
-        #     relevancy = opt.get_clip_relevancy(clip_encoder)
-        #     part_relevancies = relevancy[:,0:1][group_masks[max_mask_label]]
-        #     dino_features_for_object = opt.pipeline.model.gauss_params['dino_feats'][group_masks[max_mask_label]]
-        #     part_relevancies_filename = str(opt.config_path.parent.joinpath("part_relevancies.npy"))
-        #     dino_features_for_object_filename = str(opt.config_path.parent.joinpath("dino_features_for_object.npy"))
-        #     np.save(part_relevancies_filename,part_relevancies.detach().cpu().numpy())
-        #     np.save(dino_features_for_object_filename,dino_features_for_object.detach().cpu().numpy())
-        #     generate_grasps_handle.disabled = False
-        #     execute_grasp_handle.disabled = False
-        #     # Part Oriented Grasping here
-        # else:
-        #     print("No language query provided")
-    
+
     @execute_place_handle.on_click
     def _(_):
         max_relevancy_label = opt.max_relevancy_label
@@ -217,22 +196,14 @@ def main(
         place_pose = get_place_pose(world_to_ee,world_to_pick,world_to_place)
         place_pose_z = world_to_ee.copy()
         place_pose_z.translation = np.array([world_to_ee.translation[0],world_to_ee.translation[1],place_pose.translation[2] + 0.07])
-        # import pdb
-        # pdb.set_trace()
         robot.move_pose(place_pose_z,vel=0.1,acc=0.1)
         time.sleep(1)
         place_pose_rotation = place_pose_z
         place_pose_rotation.rotation = place_pose.rotation
-        # import pdb
-        # pdb.set_trace()
         robot.move_pose(place_pose_rotation,vel=0.1,acc=0.1)
         time.sleep(1)
-        # import pdb
-        # pdb.set_trace()
         robot.move_pose(place_pose,vel=0.1,acc=0.1)
         time.sleep(1)
-        # import pdb
-        # pdb.set_trace()
         robot.move_until_contact(vel=np.array([0,0,-0.05,0,0,0]), thres=20, acc=0.15, direction=np.array((0, 0, 1, 0, 0, 0)))
         robot.gripper.open()
         time.sleep(1)
@@ -242,7 +213,7 @@ def main(
                                 [0,0,0,1]])
         post_grasp_world_frame = place_pose.matrix @ post_grasp_tf
         post_grasp_rigid_tf = RigidTransform(rotation=post_grasp_world_frame[:3,:3],translation=post_grasp_world_frame[:3,3])
-        robot.move_pose(post_grasp_rigid_tf,vel=0.1,acc=0.1)
+        robot.move_pose(post_grasp_rigid_tf,vel=0.5,acc=0.1)
         time.sleep(1)
         home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
         robot.move_joint(home_joints,vel=1.0,acc=0.1)
@@ -278,6 +249,16 @@ def main(
         new_base_to_ee = base_to_frame_b * ee_to_object.inverse()
         return new_base_to_ee
     
+    @e_stop_reset_handle.on_click
+    def _(_):
+        robot.gripper.open()
+        time.sleep(1)
+        curr_pose = robot.get_pose()
+        translate_up_pose = curr_pose
+        translate_up_pose.translation = curr_pose.translation + np.array([0,0,0.15])
+        robot.move_pose(translate_up_pose,vel=0.15,acc=0.1)
+        time.sleep(1)
+        
     @generate_grasps_handle.on_click
     def _(_):
         # generate_grasps_handle.disabled = True
@@ -295,8 +276,8 @@ def main(
         # generate_grasps_handle.disabled = False
         # execute_grasp_handle.disabled = False
         
-    # @execute_grasp_handle.on_click
-    # def _(_):
+        # @execute_grasp_handle.on_click
+        # def _(_):
         local_ply_filename = str(opt.config_path.parent.joinpath("local.ply"))
         global_ply_filename = str(opt.config_path.parent.joinpath("global.ply"))
         table_bounding_cube_filename = str(opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
@@ -354,10 +335,10 @@ def main(
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
         robot.gripper.open()
         time.sleep(1)
-        robot.move_pose(pre_grasp_rigid_tf,vel=0.3,acc=0.1)
+        robot.move_pose(pre_grasp_rigid_tf,vel=1.0,acc=0.1)
         time.sleep(1)
         final_grasp_rigid_tf = RigidTransform(rotation=best_grasp[:3,:3],translation=best_grasp[:3,3])
-        robot.move_pose(final_grasp_rigid_tf,vel=0.3,acc=0.1)
+        robot.move_pose(final_grasp_rigid_tf,vel=1.0,acc=0.1)
         time.sleep(1)
         robot.gripper.close()
         time.sleep(1)
@@ -365,42 +346,26 @@ def main(
         time.sleep(1)
         place_query_handle.disabled = False
         
-        # center_gripper_joints = np.array(0.016485050320625305, -1.8846338430987757, -2.4609714190112513, 0.05439639091491699, 1.6994218826293945, 4.563924312591553)
-        # robot.move_joint(center_gripper_joints,vel=0.3,acc=0.1)
-        # robot.move_pose(final_grasp_rigid_tf,vel=0.5,acc=0.1)
-        # time.sleep(1)
-        # robot.gripper.open()
-        # time.sleep(3)
-
-    real_frames = []
-    rendered_rgb_frames = []
-    # rendered_depth_frames = []
-    # rendered_dino_frames = []
     part_deltas = []
     save_videos = True
     obj_label_list = [None for _ in range(opt.num_groups)]
-    
-    
+    timestr = time.strftime("%Y%m%d_%H%M%S")
+    output_dir = config_path.parent.joinpath(timestr)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    real_frames_video_writer = None
+    rendered_rgb_video_writer = None
+    fps = 5  # or use zed camera fps
     print("Starting main tracking loop")
     while True: # Main tracking loop
         try:
             if zed is not None:
-                # start_time = time.time()
                 left, right, depth = zed.get_frame()
-                # print("Got frame in ", time.time()-start_time)
-                # start_time2 = time.time()
                 assert isinstance(opt, Optimizer)
                 if opt.initialized:
-                    # start_time3 = time.time()
-                    # if not hasattr(opt.optimizer, 'frame'):
-                        # opt.set_frame(left,opt.cam2world_ns,depth)
                     opt.set_observation(left,opt.cam2world_ns,depth)
-                    # print("Set frame in ", time.time()-start_time3)
-                    # start_time5 = time.time()
                     n_opt_iters = 10
                     with zed.raft_lock:
                         outputs = opt.step_opt(niter=n_opt_iters)
-                    # print(f"{n_opt_iters} opt steps in ", time.time()-start_time5)
 
                     # Add ZED img and GS render to viser
                     rgb_img = left.cpu().numpy()
@@ -434,11 +399,30 @@ def main(
                         visible=True
                     )
                     if save_videos:
-                        # real_frames.append(rgb_img)
-                        
-                        real_frames.append(left.cpu().detach().numpy()) # Switch to this for no ROI bbox
-                        
-                        rendered_rgb_frames.append(outputs["rgb"].cpu().detach().numpy())
+                        if real_frames_video_writer is None:
+                            # Initialize the video writers
+                            H_left, W_left = left.shape[:2]
+                            H_rendered, W_rendered = outputs["rgb"].shape[:2]
+
+                            # Define the codec and create VideoWriter object
+                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+                            real_frames_video_writer = cv2.VideoWriter(str(output_dir.joinpath("real_frames.mp4")), fourcc, fps, (W_left, H_left))
+                            rendered_rgb_video_writer = cv2.VideoWriter(str(output_dir.joinpath("rendered_rgb.mp4")), fourcc, fps, (W_rendered, H_rendered))
+
+                        # Write frames to video files
+                        # For real_frames
+                        # import pdb; pdb.set_trace()
+                        real_frame = left.cpu().detach().numpy()  # shape (H, W, 3)
+                        real_frame = (real_frame).astype(np.uint8)
+                        real_frame = cv2.cvtColor(real_frame, cv2.COLOR_RGB2BGR)  # Convert to BGR if needed
+                        real_frames_video_writer.write(real_frame)
+
+                        # For rendered_rgb_frames
+                        rendered_frame = outputs["rgb"].cpu().detach().numpy()
+                        rendered_frame = (rendered_frame * 255).astype(np.uint8)
+                        rendered_frame = cv2.cvtColor(rendered_frame, cv2.COLOR_RGB2BGR)
+                        rendered_rgb_video_writer.write(rendered_frame)
                     
                     tf_list = opt.get_parts2world()
                     part_deltas.append(tf_list)
@@ -486,7 +470,6 @@ def main(
                                 obj_label_list[idx].remove()
 
                 # Visualize pointcloud.
-                start_time4 = time.time()
                 K = torch.from_numpy(zed.get_K()).float().cuda()
                 assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
                 points, colors = Zed.project_depth(left, depth, K, depth_threshold=1.0, subsample=6)
@@ -496,45 +479,45 @@ def main(
                     colors=colors,
                     point_size=0.001,
                 )
-                # print("Visualized pointcloud in ", time.time()-start_time4)
-                # print("Opt in ", time.time()-start_time2)
 
             else:
                 time.sleep(1)
                 
         except KeyboardInterrupt:
-            # Generate videos from the frames if the user interrupts the loop with ctrl+c
-            frames_dict = {"real_frames": real_frames, 
-                           "rendered_rgb": rendered_rgb_frames}
+            # Release the video writers
+            if real_frames_video_writer is not None:
+                real_frames_video_writer.release()
+            if rendered_rgb_video_writer is not None:
+                rendered_rgb_video_writer.release()
+
+            # Save background image
             background = opt.background_snapshot() # (H, W, 3)
-            timestr = generate_videos(frames_dict, fps = 5, config_path=config_path.parent)
-            
-            path = config_path.parent.joinpath(f"{timestr}")
-            
-            # save the background image
-            np.save(path.joinpath(f"background.npy"), background)
-            
-            # save the background image to a .png file
-            from PIL import Image
+            # Save background image to npy and png files
+            np.save(output_dir.joinpath("background.npy"), background)
+            # Save as PNG
             im = Image.fromarray((background*255).astype(np.uint8))
-            im.save(str(path.joinpath(f"background.png")))
-            
-            # Save part deltas to npy file
-            path = config_path.parent.joinpath(f"{timestr}")
-            np.save(path.joinpath("part_deltas_traj.npy"), np.array(part_deltas))
-            
-            # save cluster npy file
+            im.save(str(output_dir.joinpath("background.png")))
+
+            # Save part_deltas to npy file
+            np.save(output_dir.joinpath("part_deltas_traj.npy"), np.array(part_deltas))
+
+            # Save clusters
             if opt.cluster_from_file is not None:
                 clusters = opt.cluster_from_file
-                np.save(path.joinpath("clusters.npy"), clusters)
-            # else:
-            #     # copy the cluster file from the config path
-            #     import shutil
-            #     shutil.copy(opt.cluster_file, path.joinpath("clusters.npy"))
+                np.save(output_dir.joinpath("clusters.npy"), clusters)
+            else:
+                # copy the cluster file from the config path
+                import shutil
+                shutil.copy(opt.cluster_file, output_dir.joinpath("clusters.npy"))
             exit()
         except Exception as e:
-            print("An exception occured: ", e)
+            print("An exception occurred: ", e)
             traceback.print_exc()
+            # Release the video writers if an exception occurs
+            if real_frames_video_writer is not None:
+                real_frames_video_writer.release()
+            if rendered_rgb_video_writer is not None:
+                rendered_rgb_video_writer.release()
             exit()
             
 if __name__ == "__main__":

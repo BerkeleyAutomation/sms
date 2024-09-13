@@ -192,7 +192,7 @@ class RigidGroupOptimizer:
             # best_outputs = outputs
             best_poses = final_poses
         self.set_observation(PosedObservation(rgb=self.frame.rgb, camera=self.frame.camera, dino_fn=self.frame._dino_fn, metric_depth_img=self.frame.depth), extrapolate_velocity=False, init_mask=True)
-        _, best_poses = try_opt(best_poses, 10, use_depth=True, rndr=render, use_mask=self.config.use_mask_loss, use_roi=True)# do a few optimization steps with depth
+        _, best_poses = try_opt(best_poses, 70, use_depth=True, rndr=render, use_mask=self.config.use_mask_loss, use_roi=True)# do a few optimization steps with depth
         with self.render_lock:
             self.apply_to_model(
                 best_poses,

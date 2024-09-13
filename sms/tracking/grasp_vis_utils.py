@@ -158,7 +158,7 @@ def visualize_grasps(
                 color=grasp_color
             )
         i += 1
-    breakpoint()
+    # breakpoint()
     
 def main():
     data_dir = "/home/lifelong/sms/sms/data/utils/Detic/outputs/0808_drill_battery_nofeatup/sms-data/2024-08-09_113806"
