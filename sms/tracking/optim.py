@@ -110,6 +110,9 @@ class Optimizer:
         
         self.max_relevancy_label = None
         self.max_relevancy_text = None
+        
+        self.follow_max_relevancy_label = None
+        self.follow_max_relevancy_text = None
 
         self.place_max_relevancy_label = None
         self.place_max_relevancy_text = None

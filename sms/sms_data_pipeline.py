@@ -514,7 +514,7 @@ class smsdataPipeline(VanillaPipeline):
             
             sphere_inds_keep = [(torch.where(keep_inds_list == torch.tensor(sphere_inds)[i])[0]).item() for i in sphere_ind_vote.tolist()]
             # Secondary clustering in cartesian space to filter outliers
-            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.008, min_points=1)
+            group_clusters = keep_points_o3d.cluster_dbscan(eps=0.015, min_points=1)
             # group_clusters = np.asarray(keep_points_o3d.points)
             # import pdb; pdb.set_trace()
             inner_vote = torch.tensor(group_clusters)[sphere_inds_keep].mode()[0].item()
@@ -553,7 +553,7 @@ class smsdataPipeline(VanillaPipeline):
         
         
         ## Delete 552-577 if reorienting to bbox is iffy
-        points = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.model.gauss_params['means'].cpu().numpy()))
+        points = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.model.gauss_params['means'].detach().cpu().numpy()))
         # aabb = points.get_axis_aligned_bounding_box()
         # aabb.color = (1, 0, 0)
         obb = points.get_oriented_bounding_box()

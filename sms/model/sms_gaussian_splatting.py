@@ -846,7 +846,7 @@ class smsGaussianSplattingModel(SplatfactoModel):
                         count += 1
 
                 # Push the negative mask to ones normed vector
-                instance_loss += 0.3 * F.relu(torch.norm(outputs["instance"][mask[-1]] - (torch.ones(128, device=self.device)/torch.ones(128, device=self.device).norm()).repeat(mask[-1].sum(),1), p=2, dim=-1)).nanmean()
+                instance_loss += 0.1 * F.relu(torch.norm(outputs["instance"][mask[-1]] - (torch.ones(128, device=self.device)/torch.ones(128, device=self.device).norm()).repeat(mask[-1].sum(),1), p=2, dim=-1)).nanmean()
                 count += 1
                         
                 loss = instance_loss / count

@@ -35,8 +35,8 @@ class RigidGroupOptimizerConfig:
     use_depth: bool = True
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
-    depth_loss_mult = 2.7
-    depth_ignore_threshold: float = 0.1  # in meters
+    depth_loss_mult = 3.7
+    depth_ignore_threshold: float = 0.11  # in meters
     use_atap: bool = False
     pose_lr: float = 0.004
     pose_lr_final: float = 0.0008
@@ -341,24 +341,57 @@ class RigidGroupOptimizer:
                     #     out_mask[intersection] = depth_rank_binary
                                             
                     valids = (out_mask.squeeze(-1) & (~frame.roi_frames[i].depth.isnan().squeeze(-1)))
-                    feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(9,9, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
                     
                     feats_dict["real_rgb"].append(frame.roi_frames[i].rgb)
                     if use_depth:
-                        feats_dict["real_depth"].append(frame.roi_frames[i].depth)
+                        real_depth = frame.roi_frames[i].depth
+                        valid_depths = kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(5,5, device=valids.device)).to(bool).squeeze(0).squeeze(0)
+                        depths = real_depth[valid_depths]
+                        if len(depths) > 0:
+                            depths_median = torch.median(depths)
+                            # reject outliers
+                            reject = (real_depth > depths_median * 1.3).squeeze(-1)
+                            valid_depths[reject] = 0
+                            
+                            # feats_dict['valids'].append(valid_depths.unsqueeze(-1))
+                        masked_depth = real_depth * valid_depths.unsqueeze(-1)
+                        mask_zeros = torch.where(masked_depth == 0, 0, 1)
+                        masked_depth_rendered = outputs['depth'] * valid_depths.unsqueeze(-1) * mask_zeros
+                        valids = valid_depths.unsqueeze(-1) * mask_zeros
+                        valids = kornia.morphology.erosion(valids.squeeze(-1).unsqueeze(0).unsqueeze(0).to(float),torch.ones(9,9, device=valids.device)).to(bool).squeeze(0).permute(1,2,0).squeeze(-1)
+                        masked_depth = masked_depth * valids.unsqueeze(-1)
+                        masked_depth_rendered = masked_depth_rendered * valids.unsqueeze(-1)
+                        feats_dict['valids'].append(valids.unsqueeze(-1))
+                        feats_dict["real_depth"].append(masked_depth)
+                        feats_dict["rendered_depth"].append(masked_depth_rendered)
+                        # diff = (masked_depth.detach().cpu() - masked_depth_rendered.detach().cpu())
                         # import matplotlib.pyplot as plt
                         # import pdb; pdb.set_trace()
+                        # mask_zeros = torch.where(masked_depth == 0, 0, 1)
+                        # mask_zeros = kornia.morphology.erosion(mask_zeros.squeeze(-1).unsqueeze(0).unsqueeze(0).to(float),torch.ones(5,5, device=valids.device)).to(bool).squeeze(0).squeeze(0).unsqueeze(-1)
+                        # masked_depth_rendered = outputs['depth'] * valid_depths.unsqueeze(-1) * mask_zeros
+                        # masked_depth = masked_depth * mask_zeros
+                        
+                        # reject = (masked_depth - masked_depth_rendered).abs() > 0.12
+                        # masked_depth_rendered = masked_depth_rendered * (~reject)
+                        # masked_depth = masked_depth * (~reject)
+                        # feats_dict["real_depth"].append(masked_depth)
+                        # feats_dict["rendered_depth"].append(masked_depth_rendered)
+                        # import matplotlib.pyplot as plt
+                        # import pdb; pdb.set_trace()
+                        
+                    else:
+                        feats_dict['valids'].append(kornia.morphology.erosion(valids.unsqueeze(0).unsqueeze(0).to(float),torch.ones(9,9, device=valids.device)).to(bool).squeeze(0).permute(1,2,0))
+                    
                     if use_mask:
                         feats_dict["real_mask"].append((frame.roi_frames[i].mask.to(torch.float32)).unsqueeze(-1))
                         
                     if use_dino:
                         dino_feats = frame.roi_frames[i].dino_feats
-                        feats_dict["real_dino"].append(dino_feats[valids])
+                        feats_dict["real_dino"].append(dino_feats)
                     feats_dict["rendered_rgb"].append(outputs['rgb'])
                     if use_dino:
-                        feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0)[valids])
-                    if use_depth:
-                        feats_dict["rendered_depth"].append(outputs['depth'])
+                        feats_dict["rendered_dino"].append(self.blur(outputs['dino'].permute(2,0,1)[None]).squeeze().permute(1,2,0))
                         
                     accum = outputs['accumulation']
                     feats_dict["accumulation"].append(accum.to(torch.float32))                    
@@ -378,12 +411,12 @@ class RigidGroupOptimizer:
             physical_depth = feats_dict["rendered_depth"] / self.dataset_scale
             valids = feats_dict['valids']
 
-            physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=2.5)[valids]
-            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=2.5)[valids]
+            physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=1.0)[valids]
+            real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=1.0)[valids]
             pix_loss = (physical_depth_clamped - real_depth_clamped) ** 2
-            # pix_loss = pix_loss[
-            #         (pix_loss < self.config.depth_ignore_threshold**2)
-            #     ]
+            pix_loss = pix_loss[
+                    (pix_loss < self.config.depth_ignore_threshold**2)
+                ]
             if self.use_wandb:
                 wandb.log({"depth_loss": pix_loss.mean().item()})
             if torch.isnan(pix_loss.mean()).any():
