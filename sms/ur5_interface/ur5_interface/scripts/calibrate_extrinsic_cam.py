@@ -172,8 +172,9 @@ def register_webcam():
     ur.gripper.open()
     clear_tcp(ur)
     home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
-    
-    ur.move_joint(home_joints,vel=1.0,acc=0.1)
+    import pdb
+    pdb.set_trace()
+    ur.move_joint(home_joints,vel=0.1,acc=0.1)
     from ur5_interface.RAFT_Stereo.raftstereo.zed_stereo import Zed
     
     wrist_zed_id = 16347230

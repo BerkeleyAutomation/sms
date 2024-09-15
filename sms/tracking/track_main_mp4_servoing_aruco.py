@@ -92,7 +92,7 @@ def pose_estimation(
     
 def get_servo_pose(base_to_ee,base_to_frame_a,base_to_frame_b):
     start_time = time.time()
-    thetas = np.linspace(-np.pi/2,np.pi/2,60)
+    thetas = np.linspace(-np.pi,np.pi,60)
     base_to_frame_b_variations = []
     for theta in thetas:
         rotation_tf = RigidTransform(rotation=np.array([[np.cos(theta),-np.sin(theta),0],[np.sin(theta),np.cos(theta),0],[0,0,1]]),translation=np.zeros(3),to_frame='object',from_frame='object')
@@ -139,7 +139,7 @@ def main(
     robot.set_playload(1.1)
     time.sleep(1)
     home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
-    robot.move_joint(home_joints,vel=1.0,acc=0.1)
+    robot.move_joint(home_joints,vel=0.5,acc=0.1)
     server = viser.ViserServer()
     wp.init()
     # Set up the camera.
@@ -280,8 +280,10 @@ def main(
             pdb.set_trace()
             print("No Aruco marker track")
         place_pose = get_servo_pose(world_to_ee,world_to_tool,world_to_desired_servo_frame)
-        robot.move_pose(place_pose,vel=0.1,acc=0.1)
+        robot.move_pose(place_pose,vel=0.07,acc=0.1)
         time.sleep(1)
+        import pdb
+        pdb.set_trace()
         servo_aruco_handle.disabled = False
         pick_query_handle.disabled = True
         generate_grasps_handle.disabled = True
@@ -324,7 +326,7 @@ def main(
         world_to_tool_tip[:3,:3] = R.from_quat(tool_tip.wxyz,scalar_first=True).as_matrix()
         world_to_tool_tip[:3,3] = tool_tip.position
         tool_tip_to_grasp = np.eye(4)
-        tool_tip_to_grasp[:3,3] = np.array([0.005,0.1,-0.27])
+        tool_tip_to_grasp[:3,3] = np.array([0.005,0.0975,-0.27])
         best_grasp = world_to_tool_tip @ tool_tip_to_grasp
         if(best_grasp[0,1] < 0):
             rotate_180_z = np.array([[-1,0,0,0],
@@ -517,8 +519,14 @@ def main(
                             print("No Aruco marker track")
                         place_pose = get_servo_pose(world_to_ee,world_to_tool,world_to_desired_servo_frame)
                         current_to_desired = world_to_ee.inverse() * place_pose
+                        error_rotation_matrix = place_pose.matrix[:3,:3] @ world_to_ee.matrix[:3,:3].T
+                        
+                        rotation_angle = np.arccos((np.matrix.trace(error_rotation_matrix) - 1 ) / 2)
+                        rotation_scaling_factor = 0.18
+                        distance_scaling_factor = 1.5
                         distance = np.linalg.norm(current_to_desired.translation)
-                        robot_vel = min(distance,0.1)
+                        
+                        robot_vel = min((distance_scaling_factor * distance) + (rotation_angle * rotation_scaling_factor),0.07)
                         robot.move_pose(place_pose,vel=robot_vel,acc=1.0,asyn=True)
 
                 # Visualize pointcloud.

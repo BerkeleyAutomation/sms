@@ -32,7 +32,7 @@ from sms.tracking.transforms import SE3, SO3
 
 @dataclass
 class RigidGroupOptimizerConfig:
-    use_depth: bool = True
+    use_depth: bool = False
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
     depth_loss_mult = 3.7
@@ -401,8 +401,14 @@ class RigidGroupOptimizer:
                         for i in range(len(self.group_masks)):
                                 feats_dict[key][i] = feats_dict[key][i].contiguous().view(-1, feats_dict[key][i].shape[-1])
                         feats_dict[key] = torch.cat(feats_dict[key])
-
-        loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
+        if use_dino:   
+            loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
+        if use_rgb:
+            rgb_loss = (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
+            loss = rgb_loss
+            if self.use_wandb:
+                wandb.log({"rgb_loss": rgb_loss.item()})
+        # loss = (feats_dict["real_dino"] - feats_dict["rendered_dino"]).norm(dim=-1).nanmean()
         
         # THIS IS BAD WE NEED TO FIX THIS (because resizing makes the image very slightly misaligned)
         if self.use_wandb:
@@ -418,7 +424,7 @@ class RigidGroupOptimizer:
             if self.use_wandb:
                 wandb.log({"depth_loss": pix_loss.mean().item()})
             if torch.isnan(pix_loss.mean()).any():
-                import pdb; pdb.set_trace()
+                pass
             else:
                 loss = loss + self.config.depth_loss_mult * pix_loss.mean()
         if use_mask and "real_mask" in feats_dict:
@@ -426,11 +432,11 @@ class RigidGroupOptimizer:
             if self.use_wandb:
                 wandb.log({"mask_bce_loss": mask_bce_loss.mean().item()})
             loss = loss + 0.6 * mask_bce_loss
-        if use_rgb:
-            rgb_loss = 0.75 * (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
-            loss = loss + rgb_loss
-            if self.use_wandb:
-                wandb.log({"rgb_loss": rgb_loss.item()})
+        # if use_rgb:
+        #     rgb_loss = 0.75 * (feats_dict["real_rgb"] - feats_dict["rendered_rgb"]).abs().mean()
+        #     loss = loss + rgb_loss
+        #     if self.use_wandb:
+        #         wandb.log({"rgb_loss": rgb_loss.item()})
         if use_atap:
             weights = torch.ones(len(self.group_masks), len(self.group_masks),dtype=torch.float32,device='cuda')
             atap_loss = self.atap(weights)
@@ -441,7 +447,7 @@ class RigidGroupOptimizer:
         return loss, outputs
         
     # @profile
-    def step(self, niter=1, use_depth=True, use_rgb=False):
+    def step(self, niter=1, use_depth=False, use_rgb=False):
         part_scheduler = ExponentialDecayScheduler(
             ExponentialDecaySchedulerConfig(
                 lr_final=self.config.pose_lr_final, max_steps=niter
