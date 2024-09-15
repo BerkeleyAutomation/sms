@@ -35,7 +35,7 @@ def create_mesh_box(width, height, depth, dx=0, dy=0, dz=0):
         box.triangles = o3d.utility.Vector3iVector(triangles)
         return box
 
-def plot_gripper_pro_max(center, R, width, depth, score=1, color=None):
+def plot_gripper_pro_max(center, R, width, depth, depth_offset=np.array([0,0,0]), score=1, color=None):
     '''
     Author: chenxi-wang
     
@@ -96,6 +96,7 @@ def plot_gripper_pro_max(center, R, width, depth, score=1, color=None):
     tail_points[:,2] -= height/2
 
     vertices = np.concatenate([left_points, right_points, bottom_points, tail_points], axis=0)
+    vertices = vertices + depth_offset
     vertices = np.dot(R, vertices.T).T + center
     triangles = np.concatenate([left_triangles, right_triangles, bottom_triangles, tail_triangles], axis=0)
     colors = np.array([ [color_r,color_g,color_b] for _ in range(len(vertices))])
@@ -144,19 +145,24 @@ def visualize_grasps(
     worst_score = ordered_scores[-1]
     i = 0
     # breakpoint()
-    # num_vis_grasps = 20
-    # ordered_grasps = ordered_grasps[:num_vis_grasps]
-    # ordered_scores = ordered_scores[:num_vis_grasps]
+    num_vis_grasps = 30
+    ordered_grasps = ordered_grasps[:num_vis_grasps]
+    ordered_scores = ordered_scores[:num_vis_grasps]
     correction_rot = np.array([[0,-1,0], [0,0,-1], [1,0,0]])
+    pt_colors = np.zeros((num_vis_grasps,3))
+    pt_colors[:,2] = 1
+    server.add_point_cloud("/realsense",points=ordered_grasps[:,:3,3], colors=pt_colors, point_size=0.001)
+    breakpoint()
     for grasp, score in zip(ordered_grasps, ordered_scores):
-        # breakpoint()
-        chosen_depth = 0.1016#0.0408
+        breakpoint()
+        chosen_depth = 0.0408
         center = grasp[:3, 3]
-        # center[2] -= (0.1016 - chosen_depth)
+        depth_offset = np.zeros(center.shape)
+        depth_offset[2] = 0.1016-chosen_depth
         rot_matrix = grasp[:3,:3]@correction_rot
         # depth is how long to make the prongs, robotiq gripper width should be 85mm
         # correct depth is 0.1016
-        grasp_mesh, grasp_color = plot_gripper_pro_max(center=center, R=rot_matrix, width=0.085, depth=chosen_depth, score=score)
+        grasp_mesh, grasp_color = plot_gripper_pro_max(center=center, R=rot_matrix, width=0.085, depth=chosen_depth, depth_offset=depth_offset, score=score)
         normalized_score = (score - worst_score)/(best_score - worst_score)
         # grasp_color = [1 - normalized_score, normalized_score, 0]
         if score == best_score:
@@ -169,17 +175,17 @@ def visualize_grasps(
                 color=grasp_color
             )
         # center[2] += (0.1016 - chosen_depth)
-        # grasp_mesh, _ = plot_gripper_pro_max(center=center, R=rot_matrix, width=0.085, depth=0.1016, score=score)
-        # normalized_score = (score - worst_score)/(best_score - worst_score)
+        grasp_mesh, _ = plot_gripper_pro_max(center=center, R=rot_matrix, width=0.085, depth=0.1016, score=score)
+        normalized_score = (score - worst_score)/(best_score - worst_score)
         # grasp_color = [1 - normalized_score, normalized_score, 0]
-        # server.add_mesh_simple(
-        #         name=f"/grasp_{i}_test/mesh",
-        #         vertices=np.asarray(grasp_mesh.vertices),
-        #         faces=np.asarray(grasp_mesh.triangles),
-        #         color=grasp_color
-        #     )
+        server.add_mesh_simple(
+                name=f"/grasp_{i}_test/mesh",
+                vertices=np.asarray(grasp_mesh.vertices),
+                faces=np.asarray(grasp_mesh.triangles),
+                color=grasp_color
+            )
         i += 1
-    # breakpoint()
+    breakpoint()
     
 def main():
     data_dir = "/home/lifelong/sms/sms/data/utils/Detic/outputs/0808_drill_battery_nofeatup/sms-data/2024-08-09_113806"

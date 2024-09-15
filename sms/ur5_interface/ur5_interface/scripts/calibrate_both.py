@@ -169,6 +169,9 @@ def point_at(cam_t, obstacle_t, extra_R=np.eye(3)):
 def register_webcam():
     port_num = 0
     ur = UR5Robot(gripper=1)
+    ur.set_playload(1.1)
+    time.sleep(1)
+    ur.gripper.open()
     clear_tcp(ur)
     home_joints = np.array([-1.433847729359762, -1.6635258833514612, -0.8512895742999476, -3.7683952490436, -1.4371045271502894, 3.1419787406921387])
     
@@ -273,8 +276,8 @@ def register_webcam():
         # )
         d = np.array([0.0, 0, 0, 0, 0])
         # tag dimensions
-        l = 0.170  # 0.1558
-
+        l = 0.170 
+        
         out_zed_mini = None
         out_zed_extrinsic = None
         if automatic_path:

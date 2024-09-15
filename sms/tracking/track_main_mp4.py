@@ -202,7 +202,7 @@ def main(
         place_pose_rotation.rotation = place_pose.rotation
         robot.move_pose(place_pose_rotation,vel=0.1,acc=0.1)
         time.sleep(1)
-        robot.move_pose(place_pose,vel=0.1,acc=0.1)
+        robot.move_pose(place_pose,vel=0.06,acc=0.1)
         time.sleep(1)
         robot.move_until_contact(vel=np.array([0,0,-0.05,0,0,0]), thres=20, acc=0.15, direction=np.array((0, 0, 1, 0, 0, 0)))
         robot.gripper.open()

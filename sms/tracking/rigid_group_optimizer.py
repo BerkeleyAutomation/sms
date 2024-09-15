@@ -36,7 +36,7 @@ class RigidGroupOptimizerConfig:
     rank_loss_mult: float = 0.1
     rank_loss_erode: int = 5
     depth_loss_mult = 3.7
-    depth_ignore_threshold: float = 0.11  # in meters
+    depth_ignore_threshold: float = 0.26  # in meters
     use_atap: bool = False
     pose_lr: float = 0.004
     pose_lr_final: float = 0.0008
@@ -414,14 +414,13 @@ class RigidGroupOptimizer:
             physical_depth_clamped = torch.clamp(physical_depth, min=1e-8, max=1.0)[valids]
             real_depth_clamped = torch.clamp(feats_dict["real_depth"], min=1e-8, max=1.0)[valids]
             pix_loss = (physical_depth_clamped - real_depth_clamped) ** 2
-            pix_loss = pix_loss[
-                    (pix_loss < self.config.depth_ignore_threshold**2)
-                ]
+            pix_loss = pix_loss[(pix_loss < self.config.depth_ignore_threshold**2)]
             if self.use_wandb:
                 wandb.log({"depth_loss": pix_loss.mean().item()})
             if torch.isnan(pix_loss.mean()).any():
                 import pdb; pdb.set_trace()
-            loss = loss + self.config.depth_loss_mult * pix_loss.mean()
+            else:
+                loss = loss + self.config.depth_loss_mult * pix_loss.mean()
         if use_mask and "real_mask" in feats_dict:
             mask_bce_loss = F.binary_cross_entropy(feats_dict["accumulation"], feats_dict["real_mask"])
             if self.use_wandb:

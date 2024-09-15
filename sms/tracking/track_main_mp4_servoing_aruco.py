@@ -32,7 +32,7 @@ WORLD_TO_ZED2 = RigidTransform.load("/home/lifelong/sms/sms/ur5_interface/ur5_in
 
 ur5_urdf_filepath = '/home/lifelong/sms/sms/ur5_interface/ur5_interface/urdf/ur5_robot.urdf'
 ur5_ik_solver = TracIKSolver(ur5_urdf_filepath, 'base_link', 'tool0')
-
+tag_to_tool_distance = 0.07
 def clear_tcp(robot):
     tool_to_wrist = RigidTransform()
     tool_to_wrist.translation = np.array([0, 0, 0])
@@ -40,11 +40,59 @@ def clear_tcp(robot):
     tool_to_wrist.to_frame = "wrist"
     robot.set_tcp(tool_to_wrist)
     
+def pose_estimation(
+    frame,
+    aruco_dict_type,
+    matrix_coefficients,
+    distortion_coefficients,
+    tag_length,
+    visualize=False,
+):
+    """
+    frame - Frame from the video stream
+    matrix_coefficients - Intrinsic matrix of the calibrated camera
+    distortion_coefficients - Distortion coefficients associated with your camera
+
+    return:-
+    frame - The frame with the axis drawn on it
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_type)
+    parameters = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(aruco_dict,parameters)
+
+    corners, ids, _ = detector.detectMarkers(gray)
+
+    if len(corners) == 0 or len(ids) == 0:
+        print("No markers found")
+        return None
+
+    # If markers are detected
+    rvec, tvec = None, None
+    if len(corners) > 0:
+        obj_points = np.array([[-tag_length / 2, tag_length / 2, 0],
+                              [tag_length / 2, tag_length / 2, 0],
+                              [tag_length / 2, -tag_length / 2, 0],
+                              [-tag_length / 2, -tag_length / 2, 0]], dtype=np.float32)
+        for i in range(0, len(ids)):
+            img_points = corners[i].reshape((4, 2))
+            success, rvec, tvec = cv2.solvePnP(obj_points, img_points, matrix_coefficients, distortion_coefficients)
+            if success:
+                frame_3 = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # Draw Axis
+                frame_3 = cv2.drawFrameAxes(
+                    frame_3, matrix_coefficients, distortion_coefficients, rvec, tvec, 0.1
+                )
+                if visualize:
+                    cv2.imshow("img", frame_3)
+                    cv2.waitKey(0)
+                return frame, rvec, tvec
+    return None
+
     
 def get_servo_pose(base_to_ee,base_to_frame_a,base_to_frame_b):
-    print("IN METHOD")
     start_time = time.time()
-    thetas = np.linspace(-np.pi/2,np.pi/2,15)
+    thetas = np.linspace(-np.pi/2,np.pi/2,60)
     base_to_frame_b_variations = []
     for theta in thetas:
         rotation_tf = RigidTransform(rotation=np.array([[np.cos(theta),-np.sin(theta),0],[np.sin(theta),np.cos(theta),0],[0,0,1]]),translation=np.zeros(3),to_frame='object',from_frame='object')
@@ -53,21 +101,34 @@ def get_servo_pose(base_to_ee,base_to_frame_a,base_to_frame_b):
     min_angle = 1000
     min_base_to_frame_b = None
     for base_to_frame_b in base_to_frame_b_variations:
-        frame_a_to_frame_b = base_to_frame_a.inverse() * base_to_frame_b
-        angle = np.linalg.norm(R.from_matrix(frame_a_to_frame_b.rotation).as_rotvec())
+        rotation_error_matrix = base_to_frame_b.rotation @ base_to_frame_a.rotation.T
+        angle = np.arccos((np.matrix.trace(rotation_error_matrix) - 1) / 2)
         if(angle < min_angle):
             min_angle = angle
             min_base_to_frame_b = base_to_frame_b
-    if(min_base_to_frame_b is None):
-        print("No valid joint found")
-        return None
+    print("Min angle: " + str(min_angle))
     base_to_frame_b = min_base_to_frame_b
     ee_to_object = base_to_ee.inverse() * base_to_frame_a
     new_base_to_ee = base_to_frame_b * ee_to_object.inverse()
     end_time = time.time()
-    print("Min angle: " + str(min_angle * 180 / np.pi))
-    print("Time taken: " + str(end_time - start_time))
     return new_base_to_ee
+
+def rvec_tvec_to_transform(rvec, tvec,to_frame):
+    """
+    convert translation and rotation to pose
+    """
+    if rvec is None or tvec is None:
+        return None
+
+    R = cv2.Rodrigues(rvec)[0]
+    t = tvec
+    return RigidTransform(R, t, from_frame="tag", to_frame=to_frame)
+
+def estimate_theta(robot):
+    cos_theta = np.dot(robot.get_pose().matrix[:3,2],np.array([0,0,-1]))/(np.linalg.norm(robot.get_pose()))
+    theta = np.arccos(cos_theta)
+    # normalizes the angle to be between -pi and pi
+    return np.arctan2(np.sin(theta), np.cos(theta))
 
 def main(
     config_path: Path = Path("/home/lifelong/sms/sms/data/utils/Detic/outputs/20240914_drill_solo/sms-data/2024-09-14_033305/config.yml")
@@ -75,6 +136,8 @@ def main(
 
     robot = UR5Robot(gripper=1)
     clear_tcp(robot)
+    robot.set_playload(1.1)
+    time.sleep(1)
     home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
     robot.move_joint(home_joints,vel=1.0,acc=0.1)
     server = viser.ViserServer()
@@ -91,13 +154,12 @@ def main(
     assert isinstance(clip_encoder, OpenCLIPNetwork)
     
     text_handle = server.add_gui_text("Positives", "", disabled=True) # Text box for query input from user
-    follow_query_handle = server.add_gui_button("Follow Object Query",disabled=True) # Button for querying the object once the user has inputted the query
+    
     pick_query_handle = server.add_gui_button("Pick Query", disabled=True) # Button for querying the object once the user has inputted the query
-    e_stop_reset_handle = server.add_gui_button("Reset E-Stop", disabled=False) # Button for resetting the E-Stop
     generate_grasps_handle = server.add_gui_button("Generate & Execute Grasps on Pick Query", disabled=True) # Button for generating the grasps once the user has queried the object
     # execute_grasp_handle = server.add_gui_button("Execute Grasp for Pick Query", disabled=True) # Button for executing the grasp once the user has generated all suitable grasps
-    place_query_handle = server.add_gui_button("Place Query", disabled=True)
-    execute_place_handle = server.add_gui_button("Execute Placement", disabled=True)
+    go_to_aruco_handle = server.add_gui_button("Go To Aruco", disabled=True)
+    servo_aruco_handle = server.add_gui_button("Servo Aruco",disabled=False) # Button for querying the object once the user has inputted the query
     
     wrist_zed_id = 16347230
     extrinsic_zed_id = 22008760
@@ -173,6 +235,7 @@ def main(
     opt_init_handle.disabled = False
     text_handle.disabled = False
     pick_query_handle.disabled = False
+    go_to_aruco_handle.disabled = False
     
 
     @pick_query_handle.on_click
@@ -196,68 +259,32 @@ def main(
         generate_grasps_handle.disabled = False
         # execute_grasp_handle.disabled = False
 
-    @follow_query_handle.on_click
+    @servo_aruco_handle.on_click
     def _(_):
-        # TODO: Query for most relevant object
-        text_positives = text_handle.value
-        queries = text_positives.split(";")
-        if len(queries) <= 0:
-            print("Enter something in the text box and if you want multiple words, separate with ;")
-        object_query = queries[0]
-        clip_encoder.set_positives([object_query])
-        relevancy = opt.get_clip_relevancy(clip_encoder)
-        group_masks = opt.optimizer.group_masks
-
-        relevancy_avg = []
-        for mask in group_masks:
-            relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
-        relevancy_avg = torch.tensor(relevancy_avg)
-        opt.follow_max_relevancy_label = torch.argmax(relevancy_avg).item()
-        opt.follow_max_relevancy_text = text_positives
-        generate_grasps_handle.disabled = False
+        opt.is_servoing = True
+        servo_aruco_handle.disabled = True
+        pick_query_handle.disabled = True
+        generate_grasps_handle.disabled = True
         
-    @place_query_handle.on_click
+    @go_to_aruco_handle.on_click
     def _(_):
-        # TODO: Query for most relevant object
-        text_positives = text_handle.value
-        queries = text_positives.split(";")
-        if len(queries) <= 0:
-            print("Enter something in the text box and if you want multiple words, separate with ;")
-        object_query = queries[0]
-        clip_encoder.set_positives([object_query])
-        relevancy = opt.get_clip_relevancy(clip_encoder)
-        group_masks = opt.optimizer.group_masks
-
-        relevancy_avg = []
-        for mask in group_masks:
-            relevancy_avg.append(torch.mean(relevancy[:,0:1][mask]))
-        relevancy_avg = torch.tensor(relevancy_avg)
-        opt.place_max_relevancy_label = torch.argmax(relevancy_avg).item()
-        opt.place_max_relevancy_text = text_positives
-        execute_place_handle.disabled = False
-                        
-    @execute_place_handle.on_click
-    def _(_):
-        max_relevancy_label = opt.max_relevancy_label
-        place_max_relevancy_label = opt.place_max_relevancy_label
-        assert max_relevancy_label != place_max_relevancy_label, "You have the pick and the place set to the same spot"
-        print("HI")
-        import pdb
-        pdb.set_trace()
-        pick_handle = manual_tf[opt.max_relevancy_label]
-        place_handle = manual_tf[opt.place_max_relevancy_label]
+        tool_handle = manual_tf[opt.max_relevancy_label]
         world_to_ee = robot.get_pose()
         world_to_ee.from_frame = "ee"
-        world_to_pick = RigidTransform(rotation=R.from_quat(pick_handle.wxyz,scalar_first=True).as_matrix(),translation=pick_handle.position,to_frame="world",from_frame="object")
-        world_to_object = RigidTransform(rotation=R.from_quat(place_handle.wxyz,scalar_first=True).as_matrix(),translation=place_handle.position,to_frame="world",from_frame="object")
-        object_to_tool_distance = 0.07
-        object_to_desired_servo_frame = np.array([[0.0,-1.0,0.0,0.0],[-1.0,0.0,0.0,0.0],[0.0,0.0,-1.0,object_to_tool_distance],[0.0,0.0,0.0,1.0]])
-        world_to_desired_servo_frame = world_to_object.matrix @ object_to_desired_servo_frame
-        world_to_place = RigidTransform(rotation=world_to_desired_servo_frame[:3,:3],translation=world_to_desired_servo_frame[:3,3],from_frame='object',to_frame='world')
-        place_pose = get_servo_pose(world_to_ee,world_to_pick,world_to_place)
+        # world_to_ee.translation[2] = world_to_ee.translation[2] + tag_to_tool_distance + 0.01
+        # robot.move_pose(world_to_ee,vel=0.1,acc=0.1)
+        # time.sleep(1)
+        world_to_tool = RigidTransform(rotation=R.from_quat(tool_handle.wxyz,scalar_first=True).as_matrix(),translation=tool_handle.position,to_frame="world",from_frame="object")
+        if(world_to_desired_servo_frame is None):
+            import pdb
+            pdb.set_trace()
+            print("No Aruco marker track")
+        place_pose = get_servo_pose(world_to_ee,world_to_tool,world_to_desired_servo_frame)
         robot.move_pose(place_pose,vel=0.1,acc=0.1)
         time.sleep(1)
-        follow_query_handle.disabled = False
+        servo_aruco_handle.disabled = False
+        pick_query_handle.disabled = True
+        generate_grasps_handle.disabled = True
         
     # Pick in frame a and Place in frame b 
     def get_place_pose(base_to_ee,base_to_frame_a,base_to_frame_b):
@@ -287,64 +314,18 @@ def main(
         ee_to_object = base_to_ee.inverse() * base_to_frame_a
         new_base_to_ee = base_to_frame_b * ee_to_object.inverse()
         return new_base_to_ee
-    
-    @e_stop_reset_handle.on_click
-    def _(_):
-        robot.gripper.open()
-        time.sleep(1)
-        curr_pose = robot.get_pose()
-        translate_up_pose = curr_pose
-        translate_up_pose.translation = curr_pose.translation + np.array([0,0,0.15])
-        robot.move_pose(translate_up_pose,vel=0.15,acc=0.1)
-        time.sleep(1)
         
     @generate_grasps_handle.on_click
     def _(_):
         # generate_grasps_handle.disabled = True
         opt.state_to_ply(opt.max_relevancy_label)
-        local_ply_filename = str(opt.config_path.parent.joinpath("local.ply"))
-        global_ply_filename = str(opt.config_path.parent.joinpath("global.ply"))
-        table_bounding_cube_filename = str(opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
-        save_dir = str(opt.config_path.parent)
-        robot.gripper.open()
-        time.sleep(1)
-        home_joints = np.array([-1.363786522542135, -1.8143838087665003, -0.9117425123797815, -1.9958069960223597, 1.5864784717559814, 0.22764822840690613])
-        robot.move_joint(home_joints,vel=1.0,acc=0.1)
-        time.sleep(1)
-        ToadObject.generate_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, save_dir)
-        # generate_grasps_handle.disabled = False
-        # execute_grasp_handle.disabled = False
-        
-        # @execute_grasp_handle.on_click
-        # def _(_):
-        local_ply_filename = str(opt.config_path.parent.joinpath("local.ply"))
-        global_ply_filename = str(opt.config_path.parent.joinpath("global.ply"))
-        table_bounding_cube_filename = str(opt.pipeline.datamanager.get_datapath().joinpath("table_bounding_cube.json"))
-        pred_grasps_filename = str(opt.config_path.parent.joinpath("pred_grasps_world.npy"))
-        scores_filename = str(opt.config_path.parent.joinpath("scores.npy"))
-        seg_pc = o3d.io.read_point_cloud(local_ply_filename)
-        full_pc_unfiltered = o3d.io.read_point_cloud(global_ply_filename)
-
-        full_pc_points = np.asarray(full_pc_unfiltered.points)
-        full_pc_colors = np.asarray(full_pc_unfiltered.colors)
-        # Crop out noisy Gaussian means
-        bounding_box_dict = None
-        with open(table_bounding_cube_filename, 'r') as json_file:
-            # Step 2: Load the contents of the file into a Python dictionary
-            bounding_box_dict = json.load(json_file)
-        cropped_indices = (full_pc_points[:, 0] >= bounding_box_dict['x_min']) & (full_pc_points[:, 0] <= bounding_box_dict['x_max']) & (full_pc_points[:, 1] >= bounding_box_dict['y_min']) & (full_pc_points[:, 1] <= bounding_box_dict['y_max']) & (full_pc_points[:, 2] >= bounding_box_dict['z_min']) & (full_pc_points[:, 2] <= bounding_box_dict['z_max'])
-        filtered_pc_points = full_pc_points[cropped_indices]
-        filtered_pc_colors = full_pc_colors[cropped_indices]
-        
-        full_pc = o3d.geometry.PointCloud()
-        full_pc.points = o3d.utility.Vector3dVector(filtered_pc_points)
-        full_pc.colors = o3d.utility.Vector3dVector(filtered_pc_colors)
-        
-        pred_grasps = np.load(pred_grasps_filename)
-        scores = np.load(scores_filename)
-        ordered_scores = scores[np.argsort(scores[0])[::-1]]
-        # include viser visualization of the quality of the grasps
-        best_grasp = pred_grasps[np.argmax(scores)]
+        tool_tip = manual_tf[opt.max_relevancy_label]
+        world_to_tool_tip = np.eye(4)
+        world_to_tool_tip[:3,:3] = R.from_quat(tool_tip.wxyz,scalar_first=True).as_matrix()
+        world_to_tool_tip[:3,3] = tool_tip.position
+        tool_tip_to_grasp = np.eye(4)
+        tool_tip_to_grasp[:3,3] = np.array([0.005,0.1,-0.27])
+        best_grasp = world_to_tool_tip @ tool_tip_to_grasp
         if(best_grasp[0,1] < 0):
             rotate_180_z = np.array([[-1,0,0,0],
                                      [0,-1,0,0],
@@ -364,13 +345,11 @@ def main(
         
         post_grasp_tf = np.array([[1,0,0,0],
                                 [0,1,0,0],
-                                [0,0,1,-0.05],
+                                [0,0,1,-0.1],
                                 [0,0,0,1]])
         post_grasp_world_frame = best_grasp @ post_grasp_tf
         post_grasp_rigid_tf = RigidTransform(rotation=post_grasp_world_frame[:3,:3],translation=post_grasp_world_frame[:3,3])
-        # replace with viser
-        grasp_server = viser.ViserServer()
-        visualize_grasps(local_ply_filename, global_ply_filename, table_bounding_cube_filename, pred_grasps_filename, scores_filename, grasp_server)
+
         pre_grasp_rigid_tf = RigidTransform(rotation=pre_grasp_world_frame[:3,:3],translation=pre_grasp_world_frame[:3,3])
         robot.gripper.open()
         time.sleep(1)
@@ -381,9 +360,13 @@ def main(
         time.sleep(1)
         robot.gripper.close()
         time.sleep(1)
+        robot.set_playload(1.1 + 1.179) # Mass of the drill
+        time.sleep(1)
         robot.move_pose(post_grasp_rigid_tf,vel=0.3,acc=0.1)
         time.sleep(1)
-        place_query_handle.disabled = False
+        go_to_aruco_handle.disabled = False
+        pick_query_handle.disabled = True
+        generate_grasps_handle.disabled = True
         
     part_deltas = []
     save_videos = True
@@ -395,6 +378,13 @@ def main(
     rendered_rgb_video_writer = None
     fps = 5  # or use zed camera fps
     print("Starting main tracking loop")
+    zed_intrinsics = zed.get_K()
+    zed_distortion_coefficients = np.array([0.0, 0, 0, 0, 0])
+    aruco_tag_length = 0.170
+    
+    aruco_to_desired_servo_frame_matrix = np.array([[0.0,1.0,0.0,0.0],[1.0,0.0,0.0,0.0],[0.0,0.0,-1.0,tag_to_tool_distance],[0.0,0.0,0.0,1.0]])
+    aruco_to_desired_servo_frame = RigidTransform(rotation=aruco_to_desired_servo_frame_matrix[:3,:3],translation=aruco_to_desired_servo_frame_matrix[:3,3],to_frame="tag",from_frame="object")
+    world_to_desired_servo_frame = None
     while True: # Main tracking loop
         try:
             if zed is not None:
@@ -408,6 +398,15 @@ def main(
 
                     # Add ZED img and GS render to viser
                     rgb_img = left.cpu().numpy()
+                    aruco_pose_output = pose_estimation(rgb_img, cv2.aruco.DICT_6X6_50, zed_intrinsics, zed_distortion_coefficients, aruco_tag_length, visualize=False)
+                    if(aruco_pose_output is not None):
+                        _, rvec_aruco, tvec_aruco = aruco_pose_output
+                        zed_extrinsic_to_aruco = rvec_tvec_to_transform(rvec_aruco,tvec_aruco,to_frame="zed_extrinsic")
+                        world_to_aruco = camera_tf * zed_extrinsic_to_aruco
+                        world_to_desired_servo_frame = world_to_aruco * aruco_to_desired_servo_frame
+                        server.add_frame("aruco",position=world_to_aruco.translation,wxyz=world_to_aruco.quaternion,show_axes=True,axes_length=tag_to_tool_distance,axes_radius=0.005)
+                        server.add_frame("desired_servo_frame",position=world_to_desired_servo_frame.translation,wxyz=world_to_desired_servo_frame.quaternion,show_axes=True,axes_length=tag_to_tool_distance,axes_radius=0.005)
+                    
                     for i in range(len(opt.group_masks)):
                         frame = opt.optimizer.frame.roi_frames[i]
                         xmin = frame.xmin
@@ -507,46 +506,21 @@ def main(
                         else:
                             if obj_label_list[idx] is not None:
                                 obj_label_list[idx].remove()
-                    if(opt.follow_max_relevancy_label is not None and opt.max_relevancy_label is not None):
-                        
-                        # manual_tf[idx] = server.add_frame(
-                        #     f"object/manual_tf{idx}",
-                        #     position=manual_tf2w_SE3.wxyz_xyz[4:],
-                        #     wxyz= manual_tf2w_SE3.wxyz_xyz[:4],
-                        #     show_axes=True,
-                        #     axes_length=0.09,
-                        #     axes_radius=.0025
-                        # )
-                        tool_tf = manual_tf[opt.max_relevancy_label]
-                        object_tf = manual_tf[opt.follow_max_relevancy_label]
-                        world_to_tool = RigidTransform(rotation=R.from_quat(tool_tf.wxyz,scalar_first=True).as_matrix(),translation=tool_tf.position).matrix
-                        world_to_object = RigidTransform(rotation=R.from_quat(object_tf.wxyz,scalar_first=True).as_matrix(),translation=object_tf.position).matrix
-                        object_to_tool_distance = 0.1
+                    if(opt.is_servoing):
+                        tool_handle = manual_tf[opt.max_relevancy_label]
+                        world_to_ee = robot.get_pose()
+                        world_to_ee.from_frame = "ee"
+                        world_to_tool = RigidTransform(rotation=R.from_quat(tool_handle.wxyz,scalar_first=True).as_matrix(),translation=tool_handle.position,to_frame="world",from_frame="object")
+                        if(world_to_desired_servo_frame is None):
+                            import pdb
+                            pdb.set_trace()
+                            print("No Aruco marker track")
+                        place_pose = get_servo_pose(world_to_ee,world_to_tool,world_to_desired_servo_frame)
+                        current_to_desired = world_to_ee.inverse() * place_pose
+                        distance = np.linalg.norm(current_to_desired.translation)
+                        robot_vel = min(distance,0.1)
+                        robot.move_pose(place_pose,vel=robot_vel,acc=1.0,asyn=True)
 
-                        object_to_desired_servo_frame = np.array([[0.0,-1.0,0.0,0.0],[-1.0,0.0,0.0,0.0],[0.0,0.0,-1.0,object_to_tool_distance],[0.0,0.0,0.0,1.0]])
-                        world_to_desired_servo_frame = world_to_object @ object_to_desired_servo_frame
-                        
-                        server.add_frame(
-                            f"object/desired_servo_frame",
-                            position=world_to_desired_servo_frame[:3,3],
-                            wxyz=R.from_matrix(world_to_desired_servo_frame[:3,:3]).as_quat(scalar_first=True),
-                            show_axes=True,
-                            axes_length=0.09,
-                            axes_radius=.0025
-                        )
-                        world_to_ee_rigid_tf = robot.get_pose()
-                        curr_joints = robot.get_joints()
-                        world_to_ee_rigid_tf.from_frame = 'ee'
-                        world_to_drill_rigid_tf = RigidTransform(rotation=world_to_tool[:3,:3],translation=world_to_tool[:3,3],from_frame='object',to_frame='world')
-                        world_to_desired_servo_frame_rigid_tf = RigidTransform(rotation=world_to_desired_servo_frame[:3,:3],translation=world_to_desired_servo_frame[:3,3],from_frame='object',to_frame='world')
-                        # print("Curr joints: " + str(curr_joints))
-                        # print("World to ee: " + str(world_to_ee_rigid_tf))
-                        # print("World to drill: " + str(world_to_drill_rigid_tf))
-                        # print("World to object: " + str(world_to_object))
-                        # print("Object to Desired Servo Frame: " + str(object_to_desired_servo_frame))
-                        # print("World to desired servo frame: " + str(world_to_desired_servo_frame_rigid_tf))
-                        world_to_desired_ee = get_servo_pose(curr_joints,world_to_ee_rigid_tf,world_to_drill_rigid_tf,world_to_desired_servo_frame_rigid_tf)
-                        robot.move_pose(world_to_desired_ee, asyn=True,vel=0.1,acc=0.1)
                 # Visualize pointcloud.
                 K = torch.from_numpy(zed.get_K()).float().cuda()
                 assert isinstance(left, torch.Tensor) and isinstance(depth, torch.Tensor)
